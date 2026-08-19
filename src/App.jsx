@@ -2,6 +2,14 @@
 import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, touchPark } from './db/db.js';
+import {
+  getSyncStatus,
+  startAutoSync,
+  subscribeSync,
+  syncNow,
+  syncOnStartup,
+} from './lib/sync.js';
+import SyncBadge from './components/SyncBadge/index.jsx';
 import RegisterForm from './components/RegisterForm/index.jsx';
 import TreeList from './components/TreeList/index.jsx';
 import MapView from './components/MapView/index.jsx';
@@ -22,6 +30,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   // 「公園を登録してください」導線から来たときは公園の追加フォームを開いた状態にする
   const [autoOpenPark, setAutoOpenPark] = useState(false);
+  const [sync, setSync] = useState(getSyncStatus);
 
   const parks = useLiveQuery(() => db.parks.toArray(), [], null);
   const parkList = parks ?? [];
@@ -37,6 +46,27 @@ export default function App() {
       setListParkId(recent.id);
     }
   }, [parks, currentParkId]);
+
+  // 起動時: スプレッドシート（GAS）の内容を取り込み、以後は自動保存を回す。
+  // 設定タブでURLを入れていなければ何もしない（端末内だけで動く）。
+  useEffect(() => {
+    const off = subscribeSync(setSync);
+    const stopAuto = startAutoSync();
+    syncOnStartup().then((res) => {
+      if (res?.pulled?.put || res?.pulled?.removed) {
+        showToast(
+          `シートから取り込みました（更新 ${res.pulled.put}件${
+            res.pulled.removed ? ` / 削除 ${res.pulled.removed}件` : ''
+          }）`,
+        );
+      }
+    });
+    return () => {
+      off();
+      stopAuto();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const showToast = (message) => {
     setToast(message);
@@ -67,6 +97,22 @@ export default function App() {
           かんたん樹木登録
           {editingTree && <span className="appbar-sub">編集中</span>}
         </h1>
+        <SyncBadge
+          status={sync}
+          onClick={() => {
+            syncNow()
+              .then((res) => {
+                if (res?.skipped) {
+                  showToast('設定タブでGASのURLを入れると、シートと同期します');
+                  return;
+                }
+                showToast(
+                  `同期しました（取込 ${res.pulled.put}件 / 送信 ${res.pushed.records}件）`,
+                );
+              })
+              .catch((err) => showToast(`同期できません: ${err?.message ?? err}`));
+          }}
+        />
       </header>
 
       <main className="main">

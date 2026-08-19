@@ -1,6 +1,6 @@
 // バックアップ（JSON）と書き出し（CSV / GeoJSON）、取込（追記マージ）
 import { useEffect, useRef, useState } from 'react';
-import { db, estimateStorage, getSetting, setSetting } from '../../db/db.js';
+import { db, estimateStorage, getSetting, markRecordsPending, setSetting } from '../../db/db.js';
 import {
   buildCsv,
   buildFullBackup,
@@ -139,6 +139,13 @@ export default function BackupPanel({ onToast }) {
           await db.settings.put({ key: 'speciesMaster', value: merged });
         }
       });
+
+      // 取り込んだぶんもスプレッドシートへ送る（連携していなければ端末内に溜まるだけ）
+      await markRecordsPending(
+        'parks',
+        [...plan.parks.add, ...plan.parks.update].map((p) => p.id),
+      );
+      await markRecordsPending('trees', [...touched]);
 
       onToast(
         `取込みました（公園 +${plan.parks.add.length}/更新${plan.parks.update.length}、樹木 +${plan.trees.add.length}/更新${plan.trees.update.length}）`,

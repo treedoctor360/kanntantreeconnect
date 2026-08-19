@@ -2,6 +2,7 @@
 import Dexie from 'dexie';
 import { nextParkCode, nextTreeNo, renameTreeNoPrefix } from '../lib/treeNo.js';
 import { findParkByName } from '../lib/parkName.js';
+import { emitLocalChange } from '../lib/changeBus.js';
 
 export const db = new Dexie('kantantree');
 
@@ -10,6 +11,18 @@ db.version(1).stores({
   trees: 'id, parkId, treeNo, species, updatedAt, [parkId+treeNo]',
   photos: 'id, treeId', // 写真は別テーブル（一覧の描画を軽くするため）
   settings: 'key', // 樹種マスタ・使用履歴など単一値
+});
+
+// v2: GAS（スプレッドシート）への自動保存のために2つ足した。
+//   pending   … まだシートへ送っていないレコードの控え（送信できたら消す）
+//   deletions … 削除の記録（tombstone＝墓標）。消したことを他の端末へ伝えるために残す
+db.version(2).stores({
+  parks: 'id, code, name, lastUsedAt',
+  trees: 'id, parkId, treeNo, species, updatedAt, [parkId+treeNo]',
+  photos: 'id, treeId',
+  settings: 'key',
+  pending: 'id, table',
+  deletions: 'id, table, at',
 });
 
 /** UUID を作る（crypto.randomUUID が無い環境向けの控えも用意） */
@@ -22,6 +35,57 @@ export function uid() {
 }
 
 export const nowIso = () => new Date().toISOString();
+
+// ------------------------------------------------------------------
+// GAS（スプレッドシート）への自動保存のための下ごしらえ
+//
+// 保存・削除のたびに「まだ送っていないもの」を pending / deletions に書き足す。
+// 実際の送信は src/lib/sync.js が受け持つ（このファイルはネットワークに触らない）。
+// トランザクションの中で一緒に書くので、保存できたのに送信待ちに載らない、
+// という取りこぼしは起きない。
+// ------------------------------------------------------------------
+
+/** 送信待ちに積む。トランザクションの中から呼ぶこと。 */
+async function markPending(table, ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!list.length) return;
+  const at = nowIso();
+  await db.pending.bulkPut(list.map((id) => ({ id, table, at })));
+}
+
+/** 削除の記録を残す（同時に送信待ちからは外す）。トランザクションの中から呼ぶこと。 */
+async function markDeleted(table, ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!list.length) return;
+  const at = nowIso();
+  await db.deletions.bulkPut(list.map((id) => ({ id, table, at })));
+  await db.pending.bulkDelete(list);
+}
+
+/** 送信待ちの件数（設定タブの表示用） */
+export async function countPendingSync() {
+  return db.pending.count();
+}
+
+/**
+ * 上の関数を通さずに書き換えたレコード（JSON取込など）を送信待ちに積む。
+ * 自前でトランザクションを張るので、他のトランザクションの外から呼ぶこと。
+ */
+export async function markRecordsPending(table, ids) {
+  await db.transaction('rw', db.pending, () => markPending(table, ids));
+  emitLocalChange(`import:${table}`);
+}
+
+/** 送信待ちを全部積み直す（設定タブの「シートへ全件送る」用） */
+export async function markAllPending() {
+  const [parks, trees] = await Promise.all([db.parks.toArray(), db.trees.toArray()]);
+  await db.transaction('rw', db.pending, async () => {
+    await markPending('parks', parks.map((p) => p.id));
+    await markPending('trees', trees.map((t) => t.id));
+  });
+  emitLocalChange('markAllPending');
+  return parks.length + trees.length;
+}
 
 // ------------------------------------------------------------------
 // 設定（単一値）
@@ -83,7 +147,11 @@ export async function addPark({ code, name, lat = null, lng = null, note = '' })
     createdAt: t,
     updatedAt: t,
   };
-  await db.parks.add(park);
+  await db.transaction('rw', db.parks, db.pending, async () => {
+    await db.parks.add(park);
+    await markPending('parks', park.id);
+  });
+  emitLocalChange('addPark');
   return park;
 }
 
@@ -95,7 +163,7 @@ export async function addPark({ code, name, lat = null, lng = null, note = '' })
 export async function importParks(rows) {
   let added = 0;
   const skippedNames = [];
-  await db.transaction('rw', db.parks, async () => {
+  await db.transaction('rw', db.parks, db.pending, async () => {
     const existing = await db.parks.toArray();
     const codes = existing.map((p) => p.code);
     const pool = [...existing];
@@ -133,8 +201,12 @@ export async function importParks(rows) {
       added += 1;
       i += 1;
     }
-    if (toAdd.length) await db.parks.bulkAdd(toAdd);
+    if (toAdd.length) {
+      await db.parks.bulkAdd(toAdd);
+      await markPending('parks', toAdd.map((p) => p.id));
+    }
   });
+  emitLocalChange('importParks');
   return { added, skipped: skippedNames.length, skippedNames };
 }
 
@@ -144,11 +216,12 @@ export async function importParks(rows) {
  * 単一トランザクション（途中で失敗したら全部取り消される一括処理）で書き換える。
  */
 export async function updatePark(id, patch, { renumber = false } = {}) {
-  await db.transaction('rw', db.parks, db.trees, async () => {
+  await db.transaction('rw', db.parks, db.trees, db.pending, async () => {
     const before = await db.parks.get(id);
     if (!before) return;
     const after = { ...before, ...patch, updatedAt: nowIso() };
     await db.parks.put(after);
+    await markPending('parks', after.id);
 
     if (before.code !== after.code) {
       const trees = await db.trees.where('parkId').equals(id).toArray();
@@ -158,9 +231,13 @@ export async function updatePark(id, patch, { renumber = false } = {}) {
         treeNo: renumber ? renameTreeNoPrefix(tree.treeNo, before.code, after.code) : tree.treeNo,
         updatedAt: nowIso(),
       }));
-      if (updated.length) await db.trees.bulkPut(updated);
+      if (updated.length) {
+        await db.trees.bulkPut(updated);
+        await markPending('trees', updated.map((t) => t.id));
+      }
     }
   });
+  emitLocalChange('updatePark');
 }
 
 /** その公園に属する樹木・写真の件数（削除確認ダイアログ用） */
@@ -173,12 +250,15 @@ export async function countParkContents(parkId) {
 
 /** 公園をまるごと削除（配下の樹木・写真も。単一トランザクション） */
 export async function deleteParkCascade(parkId) {
-  await db.transaction('rw', db.parks, db.trees, db.photos, async () => {
+  await db.transaction('rw', db.parks, db.trees, db.photos, db.pending, db.deletions, async () => {
     const treeIds = (await db.trees.where('parkId').equals(parkId).toArray()).map((t) => t.id);
     if (treeIds.length) await db.photos.where('treeId').anyOf(treeIds).delete();
     await db.trees.where('parkId').equals(parkId).delete();
     await db.parks.delete(parkId);
+    await markDeleted('trees', treeIds);
+    await markDeleted('parks', parkId);
   });
+  emitLocalChange('deletePark');
 }
 
 /** 公園を「最後に使った」印を付ける（一覧の並び順に使う） */
@@ -218,8 +298,9 @@ export async function saveTree(tree, photoDataUrls = []) {
     registeredAt: tree.registeredAt ?? t,
     updatedAt: t,
   };
-  await db.transaction('rw', db.trees, db.photos, db.parks, async () => {
+  await db.transaction('rw', db.trees, db.photos, db.parks, db.pending, async () => {
     await db.trees.put(record);
+    await markPending('trees', record.id);
     await db.photos.where('treeId').equals(record.id).delete();
     if (photoDataUrls.length) {
       await db.photos.bulkAdd(
@@ -234,6 +315,7 @@ export async function saveTree(tree, photoDataUrls = []) {
     }
     if (record.parkId) await db.parks.update(record.parkId, { lastUsedAt: t });
   });
+  emitLocalChange('saveTree');
   return record;
 }
 
@@ -245,10 +327,12 @@ export async function getTreePhotos(treeId) {
 /** 樹木を削除（写真も一緒に。単一トランザクション） */
 export async function deleteTrees(treeIds) {
   if (!treeIds.length) return;
-  await db.transaction('rw', db.trees, db.photos, async () => {
+  await db.transaction('rw', db.trees, db.photos, db.pending, db.deletions, async () => {
     await db.photos.where('treeId').anyOf(treeIds).delete();
     await db.trees.bulkDelete(treeIds);
+    await markDeleted('trees', treeIds);
   });
+  emitLocalChange('deleteTrees');
 }
 
 /** ストレージ使用量の概算（ブラウザが対応していれば） */

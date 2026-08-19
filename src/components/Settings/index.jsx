@@ -1,6 +1,7 @@
 // 設定タブ
 import ParkManager from './ParkManager.jsx';
 import SpeciesManager from './SpeciesManager.jsx';
+import SyncPanel from './SyncPanel.jsx';
 import BackupPanel from './BackupPanel.jsx';
 
 export default function Settings({ parks, onToast, onParkDeleted, autoOpenPark = false }) {
@@ -13,6 +14,7 @@ export default function Settings({ parks, onToast, onParkDeleted, autoOpenPark =
         autoOpen={autoOpenPark}
       />
       <SpeciesManager onToast={onToast} />
+      <SyncPanel onToast={onToast} />
       <BackupPanel onToast={onToast} />
     </div>
   );
