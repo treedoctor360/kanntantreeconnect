@@ -10,9 +10,13 @@ import {
   suggestTreeNo,
 } from '../../db/db.js';
 import { makeThumb } from '../../lib/image.js';
+import { emptyInspection, emptySurvey, pickInspection } from '../../lib/inspection.js';
+import { tapeNoFromTreeNo, treeNoFromTape } from '../../lib/treeNo.js';
 import LocationPicker from '../LocationPicker/index.jsx';
 import SpeciesTiles from '../SpeciesTiles/index.jsx';
 import PhotoInput from '../PhotoInput/index.jsx';
+import InspectionFields from '../InspectionFields/index.jsx';
+import SurveyInfo from '../SurveyInfo/index.jsx';
 
 const emptyCoord = { lat: null, lng: null, accuracy: null, coordSource: null };
 
@@ -40,6 +44,10 @@ export default function RegisterForm({
   const [optionOpen, setOptionOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dupWarn, setDupWarn] = useState(false);
+  // 点検内容（紙のチェックシート1ページ目）と調査情報（表頭）
+  const [inspection, setInspection] = useState(emptyInspection);
+  const [survey, setSurvey] = useState(emptySurvey);
+  const [surveyOpen, setSurveyOpen] = useState(false);
 
   const speciesMaster = useLiveQuery(() => db.settings.get('speciesMaster'), [], null);
   const speciesUsage = useLiveQuery(() => db.settings.get('speciesUsage'), [], null);
@@ -62,15 +70,23 @@ export default function RegisterForm({
     setGirth(editingTree.girth ?? '');
     setNote(editingTree.note ?? '');
     setOptionOpen(Boolean(editingTree.height || editingTree.girth || editingTree.note));
+    setInspection(pickInspection(editingTree));
+    setSurvey({
+      surveyDate: editingTree.surveyDate ?? '',
+      surveyor: editingTree.surveyor ?? '',
+      tapeRoll: editingTree.tapeRoll ?? '',
+    });
     getTreePhotos(editingTree.id).then((rows) => setPhotos(rows.map((r) => r.dataUrl)));
   }, [isEdit, editingTree]);
 
-  // 新規: 公園が変わったら次の番号を出し直す
+  // 新規: 公園が変わったら次の番号（＝次のテープ番号）を出し直す
   useEffect(() => {
     if (isEdit || !park) return;
     let alive = true;
     suggestTreeNo(park.id, park.code).then((no) => {
-      if (alive && !treeNoEdited) setTreeNo(no);
+      if (!alive || treeNoEdited) return;
+      setTreeNo(no);
+      setInspection((v) => ({ ...v, tapeNo: tapeNoFromTreeNo(no, park.code) }));
     });
     return () => {
       alive = false;
@@ -84,6 +100,15 @@ export default function RegisterForm({
     if (isEdit || species) return;
     db.settings.get('lastSpecies').then((row) => {
       if (row?.value) setSpecies(row.value);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit]);
+
+  // 新規: 前回の調査情報（調査日・調査者・テープロール）を引き継ぐ
+  useEffect(() => {
+    if (isEdit) return;
+    db.settings.get('lastSurvey').then((row) => {
+      if (row?.value) setSurvey((v) => ({ ...v, ...row.value }));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEdit]);
@@ -108,6 +133,19 @@ export default function RegisterForm({
     [parks],
   );
 
+  /**
+   * 点検内容の変更。テープ番号を入れたら樹木番号もそれに合わせる
+   * （紙のシートの「樹木番号（公園コード+テープ番号）」に従う）。
+   * 樹木番号を手で直したあとは、上書きしない。
+   */
+  const handleInspectionChange = (next) => {
+    setInspection(next);
+    if (isEdit || treeNoEdited || !park) return;
+    if (next.tapeNo === inspection.tapeNo) return;
+    const derived = treeNoFromTape(park.code, next.tapeNo);
+    if (derived) setTreeNo(derived);
+  };
+
   const resetForNext = async (nextPark) => {
     setCoord(emptyCoord);
     setPhotos([]);
@@ -116,7 +154,13 @@ export default function RegisterForm({
     setNote('');
     setOptionOpen(false);
     setTreeNoEdited(false);
-    if (nextPark) setTreeNo(await suggestTreeNo(nextPark.id, nextPark.code));
+    // 点検内容は1本ごとに違うので消す。テープ番号だけは次の番号を入れておく
+    const nextNo = nextPark ? await suggestTreeNo(nextPark.id, nextPark.code) : '';
+    setInspection({
+      ...emptyInspection(),
+      tapeNo: nextPark ? tapeNoFromTreeNo(nextNo, nextPark.code) : '',
+    });
+    if (nextPark) setTreeNo(nextNo);
   };
 
   const handleSave = async () => {
@@ -150,11 +194,29 @@ export default function RegisterForm({
         girth: girth === '' ? null : Number(girth),
         note: note.trim(),
         thumb,
+        // 点検内容（紙のチェックシート1ページ目）
+        tapeNo: inspection.tapeNo.trim(),
+        leafDensity: inspection.leafDensity,
+        fungus: inspection.fungus,
+        fungusPart: inspection.fungusPart,
+        cavity: inspection.cavity,
+        frass: inspection.frass,
+        caution: inspection.caution.trim(),
+        photoCount: photos.length, // 紙の「写真」欄にあたる（写真そのものはシートに送らない）
+        // 調査情報（表頭）
+        surveyDate: survey.surveyDate,
+        surveyor: survey.surveyor.trim(),
+        tapeRoll: survey.tapeRoll,
       };
       const saved = await saveTree(record, photos);
       // 使用回数は新規登録のときだけ増やす（編集のたびに増えると並び順が実態とずれる）
       await recordSpeciesUse(saved.species, { count: !isEdit });
       await db.settings.put({ key: 'lastSpecies', value: saved.species });
+      // 調査情報は次の登録に引き継ぐ
+      await db.settings.put({
+        key: 'lastSurvey',
+        value: { surveyDate: survey.surveyDate, surveyor: survey.surveyor.trim(), tapeRoll: survey.tapeRoll },
+      });
 
       if (isEdit) {
         onToast(`${saved.treeNo} を更新しました`);
@@ -204,25 +266,51 @@ export default function RegisterForm({
         </section>
       )}
 
+      <SurveyInfo
+        value={survey}
+        onChange={setSurvey}
+        parkName={park?.name ?? ''}
+        open={surveyOpen}
+        onToggle={() => setSurveyOpen((v) => !v)}
+      />
+
       <section className="block">
         <h3 className="block-title">
-          樹木番号 {isEdit ? '' : <span className="muted">（次の番号。タップで編集）</span>}
+          テープ番号・樹木番号{' '}
+          {isEdit ? '' : <span className="muted">（次の番号。タップで編集）</span>}
         </h3>
-        <input
-          className="treeno-input"
-          type="text"
-          value={treeNo}
-          onChange={(e) => {
-            setTreeNo(e.target.value);
-            setTreeNoEdited(true);
-          }}
-          placeholder="P001-001"
-        />
+        <div className="field-row">
+          <label className="field field-tape">
+            <span className="field-label">テープ番号</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={inspection.tapeNo}
+              onChange={(e) => handleInspectionChange({ ...inspection, tapeNo: e.target.value })}
+              placeholder="12"
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">樹木番号（公園コード＋テープ番号）</span>
+            <input
+              className="treeno-input"
+              type="text"
+              value={treeNo}
+              onChange={(e) => {
+                setTreeNo(e.target.value);
+                setTreeNoEdited(true);
+              }}
+              placeholder="P001-001"
+            />
+          </label>
+        </div>
         {isEdit && park && <p className="hint">公園: {park.name}</p>}
         {dupWarn && <p className="status status-error">同じ公園にこの番号がすでにあります。</p>}
       </section>
 
       <SpeciesTiles value={species} onChange={setSpecies} master={master} usage={usage} />
+
+      <InspectionFields value={inspection} onChange={handleInspectionChange} />
 
       <LocationPicker
         value={coord}

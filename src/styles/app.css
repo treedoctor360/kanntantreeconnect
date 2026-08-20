@@ -221,6 +221,53 @@ textarea {
   letter-spacing: 0.03em;
 }
 
+/* --- 点検内容の選択欄（紙のチェックシートで〇を付ける欄にあたる） --- */
+.choice-row {
+  margin-bottom: 10px;
+}
+.choice-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.choice-opts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.choice {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 17px;
+  font-family: inherit;
+  font-weight: 600;
+}
+.choice-on {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+.choice-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+/* テープ番号は数字だけなので狭くてよい（樹木番号に幅を譲る） */
+.field-tape {
+  flex: 0 0 88px;
+}
+.survey-summary {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
 /* --- ボタン --- */
 .btn {
   font-size: 15px;
@@ -601,6 +648,12 @@ textarea {
 .badge-warn {
   border-color: var(--warn);
   color: var(--warn);
+}
+/* 点検で「有」だったもの（キノコ・空洞・傷・フラス） */
+.badge-alert {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 600;
 }
 .checkbox {
   flex: 0 0 auto;

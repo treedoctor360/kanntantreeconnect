@@ -9,6 +9,8 @@ import {
   nextTreeNo,
   isDuplicateTreeNo,
   renameTreeNoPrefix,
+  treeNoFromTape,
+  tapeNoFromTreeNo,
 } from '../src/lib/treeNo.js';
 
 test('公園コード: 空配列なら P001', () => {
@@ -76,4 +78,31 @@ test('公園コード変更時の番号付け替え', () => {
   assert.equal(renameTreeNoPrefix('P001-004', 'P001', 'KOJI'), 'KOJI-004');
   // 旧コードで始まらない番号（手で書き換えたもの）は触らない
   assert.equal(renameTreeNoPrefix('別番号-1', 'P001', 'KOJI'), '別番号-1');
+});
+
+// --- テープ番号（現地チェックシートの「樹木番号（公園コード+テープ番号）」） ---
+
+test('テープ番号から樹木番号を作る（数字は3桁にそろえる）', () => {
+  assert.equal(treeNoFromTape('P001', '4'), 'P001-004');
+  assert.equal(treeNoFromTape('P001', '004'), 'P001-004');
+  assert.equal(treeNoFromTape('P001', '128'), 'P001-128');
+  assert.equal(treeNoFromTape('KOJI', '7'), 'KOJI-007');
+});
+
+test('テープ番号が数字でなければそのまま付ける', () => {
+  assert.equal(treeNoFromTape('P001', '12b'), 'P001-12b');
+});
+
+test('テープ番号が空なら樹木番号も作らない', () => {
+  assert.equal(treeNoFromTape('P001', ''), '');
+  assert.equal(treeNoFromTape('P001', '  '), '');
+  assert.equal(treeNoFromTape('', '4'), '');
+});
+
+test('樹木番号からテープ番号を取り出す（次の番号の初期値に使う）', () => {
+  assert.equal(tapeNoFromTreeNo('P001-004', 'P001'), '4');
+  assert.equal(tapeNoFromTreeNo('P001-128', 'P001'), '128');
+  // 公園コードが違う／手書きの番号は取り出さない
+  assert.equal(tapeNoFromTreeNo('P002-004', 'P001'), '');
+  assert.equal(tapeNoFromTreeNo('P001-004b', 'P001'), '');
 });

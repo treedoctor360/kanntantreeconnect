@@ -27,6 +27,26 @@ export function formatTreeNo(parkCode, seq) {
 }
 
 /**
+ * テープ番号から樹木番号を作る。
+ * 紙のチェックシートの「樹木番号（公園コード+テープ番号）」に合わせる。
+ * 数字だけのテープ番号は3桁に揃え、それ以外（'12b' など）はそのまま後ろに付ける。
+ */
+export function treeNoFromTape(parkCode, tapeNo) {
+  const tape = String(tapeNo ?? '').trim();
+  if (!parkCode || !tape) return '';
+  return /^\d+$/.test(tape) ? formatTreeNo(parkCode, parseInt(tape, 10)) : `${parkCode}-${tape}`;
+}
+
+/**
+ * 樹木番号からテープ番号を取り出す（登録後に次のテープ番号を出すために使う）。
+ * 公園コードが一致しなければ空文字。
+ */
+export function tapeNoFromTreeNo(treeNo, parkCode) {
+  const seq = parseTreeSeq(treeNo, parkCode);
+  return seq === null ? '' : String(seq);
+}
+
+/**
  * 樹木番号から連番部分を取り出す。
  * 公園コードが一致しない／連番が数字でない場合は null。
  * （手で書き換えた 'P001-004b' のような番号は採番の計算に混ぜない）

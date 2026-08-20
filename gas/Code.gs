@@ -23,11 +23,26 @@
  * © 2026 Koh Kitsukawa. All rights reserved.
  */
 
-/** シートごとの列。ここに並べた順にそのまま列になる。 */
+/**
+ * シートごとの列。ここに並べた順にそのまま列になる。
+ *
+ * trees の並びは紙の「樹木点検 現地チェックシート」1ページ目に合わせてある:
+ *   場所（parkCode）/ テープ番号 / 樹木番号 / 樹種 / 葉の茂り / キノコ / キノコ部位 /
+ *   空洞・傷 / フラス / 注意 / 写真（枚数）… に続けて、
+ *   表頭の 調査日 / 調査者 / テープロール、そのあとアプリ固有の座標などを置く。
+ *
+ * 列を変えたら、アプリ側（src/lib/io.js の CSV_COLUMNS・保存処理）と
+ * gas/README.md の表も一緒に直すこと。
+ * 既にシートを作ったあとで列を変えた場合は、getSheet_ が見出し行を作り直し、
+ * 既存の行を新しい列の位置へ並べ替える（下の ensureHeaders_ 参照）。
+ */
 var SHEETS = {
   parks: ['id', 'code', 'name', 'lat', 'lng', 'note', 'pid', 'lastUsedAt', 'createdAt', 'updatedAt'],
   trees: [
-    'id', 'parkId', 'parkCode', 'treeNo', 'species',
+    'id', 'parkId', 'parkCode',
+    'tapeNo', 'treeNo', 'species',
+    'leafDensity', 'fungus', 'fungusPart', 'cavity', 'frass', 'caution', 'photoCount',
+    'surveyDate', 'surveyor', 'tapeRoll',
     'lat', 'lng', 'accuracy', 'coordSource',
     'height', 'girth', 'note', 'registeredAt', 'updatedAt',
   ],
@@ -35,7 +50,7 @@ var SHEETS = {
 };
 
 /** 数値として扱う列。それ以外は文字列（日時がDateに化けないよう書式を「書式なしテキスト」にする） */
-var NUMBER_FIELDS = ['lat', 'lng', 'accuracy', 'height', 'girth'];
+var NUMBER_FIELDS = ['lat', 'lng', 'accuracy', 'height', 'girth', 'photoCount'];
 
 /** アプリと同期する実体のシート（deletions は削除の記録なので別扱い） */
 var DATA_SHEETS = ['parks', 'trees'];
@@ -145,23 +160,60 @@ function book_() {
   return active;
 }
 
-/** シートを取り出す（無ければ見出し付きで作る） */
+/** シートを取り出す（無ければ見出し付きで作る。列が変わっていれば作り直す） */
 function getSheet_(name) {
   var ss = book_();
   var sheet = ss.getSheetByName(name);
   var headers = SHEETS[name];
   if (!sheet) {
     sheet = ss.insertSheet(name);
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-    // 日時（ISO文字列）が勝手に日付として解釈されないよう、数値列以外は「書式なしテキスト」にする
-    headers.forEach(function (h, i) {
-      if (NUMBER_FIELDS.indexOf(h) < 0) {
-        sheet.getRange(1, i + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
-      }
-    });
+    writeHeaders_(sheet, headers);
+  } else {
+    ensureHeaders_(sheet, headers);
   }
   return sheet;
+}
+
+/** 見出し行を書き、日時が日付型に化けないよう数値列以外を「書式なしテキスト」にする */
+function writeHeaders_(sheet, headers) {
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  headers.forEach(function (h, i) {
+    if (NUMBER_FIELDS.indexOf(h) < 0) {
+      sheet.getRange(1, i + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
+    }
+  });
+}
+
+/**
+ * 既にあるシートの見出しが SHEETS の並びと違っていたら、並べ替えて作り直す。
+ *
+ * 列を足した／並びを変えたあとに古いシートをそのまま使うと、
+ * 値が1列ずつずれて入るという分かりにくい壊れ方をする。それを防ぐため、
+ * 古い見出しでいったん読んでから、新しい列の位置へ入れ直す。
+ * 新しい列は空欄、消えた列の値は捨てられる（消す前に手で控えを取ること）。
+ */
+function ensureHeaders_(sheet, headers) {
+  var width = Math.max(sheet.getLastColumn(), headers.length);
+  var current = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (v) {
+    return String(v || '');
+  });
+  var same = headers.every(function (h, i) { return current[i] === h; }) &&
+    current.slice(headers.length).every(function (v) { return v === ''; });
+  if (same) return;
+
+  var last = sheet.getLastRow();
+  var rows = last > 1 ? sheet.getRange(2, 1, last - 1, width).getValues() : [];
+  var moved = rows.map(function (row) {
+    return headers.map(function (h) {
+      var from = current.indexOf(h);
+      return from >= 0 ? row[from] : '';
+    });
+  });
+
+  sheet.clear();
+  writeHeaders_(sheet, headers);
+  if (moved.length) sheet.getRange(2, 1, moved.length, headers.length).setValues(moved);
 }
 
 /** セルの値をJSON向けに整える */

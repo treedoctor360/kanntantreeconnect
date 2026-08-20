@@ -34,12 +34,26 @@ export function buildLightBackup({ parks, trees }) {
   };
 }
 
+// 並びは紙の「樹木点検 現地チェックシート」に合わせてある
+// （場所＝公園名 / テープ番号 / 樹木番号 / 樹種 / 葉の茂り / キノコ / キノコ部位 /
+//   空洞・傷 / フラス / 注意 / 写真）。列を足すときは gas/Code.gs の SHEETS も直すこと。
 const CSV_COLUMNS = [
   ['id', (t) => t.id],
   ['公園コード', (t) => t.parkCode ?? ''],
   ['公園名', (t, parkName) => parkName],
+  ['テープ番号', (t) => t.tapeNo ?? ''],
   ['樹木番号', (t) => t.treeNo ?? ''],
   ['樹種', (t) => t.species ?? ''],
+  ['葉の茂り', (t) => t.leafDensity ?? ''],
+  ['キノコ', (t) => t.fungus ?? ''],
+  ['キノコ部位', (t) => t.fungusPart ?? ''],
+  ['空洞・傷', (t) => t.cavity ?? ''],
+  ['フラス', (t) => t.frass ?? ''],
+  ['注意', (t) => t.caution ?? ''],
+  ['写真枚数', (t) => (t.photoCount == null ? '' : t.photoCount)],
+  ['調査日', (t) => t.surveyDate ?? ''],
+  ['調査者', (t) => t.surveyor ?? ''],
+  ['テープロール', (t) => t.tapeRoll ?? ''],
   ['緯度', (t) => (t.lat ?? '') === '' ? '' : String(t.lat)],
   ['経度', (t) => (t.lng ?? '') === '' ? '' : String(t.lng)],
   ['誤差m', (t) => (t.accuracy == null ? '' : Math.round(t.accuracy))],
@@ -76,8 +90,20 @@ export function buildGeoJson(trees, parkNameById = {}) {
         id: t.id,
         parkCode: t.parkCode ?? '',
         parkName: parkNameById[t.parkId] ?? '',
+        tapeNo: t.tapeNo ?? '',
         treeNo: t.treeNo ?? '',
         species: t.species ?? '',
+        // 点検内容（紙のチェックシート1ページ目）
+        leafDensity: t.leafDensity ?? '',
+        fungus: t.fungus ?? '',
+        fungusPart: t.fungusPart ?? '',
+        cavity: t.cavity ?? '',
+        frass: t.frass ?? '',
+        caution: t.caution ?? '',
+        photoCount: t.photoCount ?? 0,
+        surveyDate: t.surveyDate ?? '',
+        surveyor: t.surveyor ?? '',
+        tapeRoll: t.tapeRoll ?? '',
         accuracy: t.accuracy ?? null,
         coordSource: t.coordSource ?? null,
         height: t.height ?? null,
