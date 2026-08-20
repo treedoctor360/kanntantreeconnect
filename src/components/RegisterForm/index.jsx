@@ -39,7 +39,6 @@ export default function RegisterForm({
   const [species, setSpecies] = useState('');
   const [coord, setCoord] = useState(emptyCoord);
   const [photos, setPhotos] = useState([]);
-  const [height, setHeight] = useState('');
   const [girth, setGirth] = useState('');
   const [note, setNote] = useState('');
   const [optionOpen, setOptionOpen] = useState(false);
@@ -68,10 +67,9 @@ export default function RegisterForm({
       accuracy: editingTree.accuracy ?? null,
       coordSource: editingTree.coordSource ?? null,
     });
-    setHeight(editingTree.height ?? '');
     setGirth(editingTree.girth ?? '');
     setNote(editingTree.note ?? '');
-    setOptionOpen(Boolean(editingTree.height || editingTree.girth || editingTree.note));
+    setOptionOpen(Boolean(editingTree.girth || editingTree.note));
     setInspection(pickInspection(editingTree));
     setSurvey({
       surveyDate: editingTree.surveyDate ?? '',
@@ -153,7 +151,6 @@ export default function RegisterForm({
   const resetForNext = async (nextPark) => {
     setCoord(emptyCoord);
     setPhotos([]);
-    setHeight('');
     setGirth('');
     setNote('');
     setOptionOpen(false);
@@ -192,17 +189,22 @@ export default function RegisterForm({
         lng: Number.isFinite(coord.lng) ? coord.lng : null,
         accuracy: coord.accuracy ?? null,
         coordSource: coord.coordSource ?? null,
-        height: height === '' ? null : Number(height),
         girth: girth === '' ? null : Number(girth),
         note: note.trim(),
         thumb,
         // 点検内容（紙のチェックシート1ページ目）
         tapeNo: inspection.tapeNo.trim(),
+        height: inspection.height === '' ? null : Number(inspection.height),
         leafDensity: inspection.leafDensity,
         fungus: inspection.fungus,
         fungusPart: inspection.fungusPart,
         cavity: inspection.cavity,
+        cavityPart: inspection.cavityPart,
         frass: inspection.frass,
+        envRoad: inspection.envRoad,
+        envWire: inspection.envWire,
+        envBuilding: inspection.envBuilding,
+        envNote: inspection.envNote.trim(),
         caution: inspection.caution.trim(),
         photoCount: photos.length, // 紙の「写真」欄にあたる（写真そのものはシートに送らない）
         // 調査情報（表頭）
@@ -324,32 +326,21 @@ export default function RegisterForm({
 
       <section className="block">
         <button type="button" className="disclosure" onClick={() => setOptionOpen((v) => !v)}>
-          {optionOpen ? '▼' : '▶'} 任意項目（樹高・幹周・メモ）
+          {optionOpen ? '▼' : '▶'} 任意項目（幹周・メモ）
         </button>
         {optionOpen && (
           <>
-            <div className="field-row">
-              <label className="field">
-                <span className="field-label">樹高 (m)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  value={height}
-                  onChange={(e) => setHeight(e.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">幹周 (cm)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="1"
-                  value={girth}
-                  onChange={(e) => setGirth(e.target.value)}
-                />
-              </label>
-            </div>
+            {/* 樹高は点検内容の欄に移した（紙のシートの並びに合わせるため） */}
+            <label className="field">
+              <span className="field-label">幹周 (cm)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="1"
+                value={girth}
+                onChange={(e) => setGirth(e.target.value)}
+              />
+            </label>
             <label className="field">
               <span className="field-label">メモ</span>
               <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />

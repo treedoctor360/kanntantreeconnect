@@ -33,8 +33,9 @@
  * シートごとの列。ここに並べた順にそのまま列になる。
  *
  * trees の並びは紙の「樹木点検 現地チェックシート」1ページ目に合わせてある:
- *   場所（parkCode）/ テープ番号 / 樹木番号 / 樹種 / 葉の茂り / キノコ / キノコ部位 /
- *   空洞・傷 / フラス / 注意 / 写真（枚数）… に続けて、
+ *   場所（parkCode）/ テープ番号 / 樹木番号 / 樹種 / 樹高 / 葉の茂り / キノコ / キノコ部位 /
+ *   空洞・傷 / 空洞・傷の位置 / フラス / 周辺環境（道路園路・電線・建物・備考）/
+ *   注意 / 写真（枚数）… に続けて、
  *   表頭の 調査日 / 調査者 / テープロール、そのあとアプリ固有の座標などを置く。
  *
  * 列を変えたら、アプリ側（src/lib/io.js の CSV_COLUMNS・保存処理）と
@@ -48,11 +49,14 @@ var SHEETS = {
   parks: ['id', 'code', 'name', 'lat', 'lng', 'note', 'pid', 'lastUsedAt', 'createdAt', 'updatedAt'],
   trees: [
     'id', 'parkId', 'parkCode',
-    'tapeNo', 'treeNo', 'species',
-    'leafDensity', 'fungus', 'fungusPart', 'cavity', 'frass', 'caution', 'photoCount',
+    'tapeNo', 'treeNo', 'species', 'height',
+    'leafDensity', 'fungus', 'fungusPart',
+    'cavity', 'cavityPart', 'frass',
+    'envRoad', 'envWire', 'envBuilding', 'envNote',
+    'caution', 'photoCount',
     'surveyDate', 'surveyor', 'tapeRoll',
     'lat', 'lng', 'accuracy', 'coordSource',
-    'height', 'girth', 'note', 'registeredAt', 'updatedAt',
+    'girth', 'note', 'registeredAt', 'updatedAt',
   ],
   deletions: ['id', 'table', 'at'],
 };

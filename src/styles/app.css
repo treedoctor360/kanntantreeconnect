@@ -259,6 +259,58 @@ textarea {
   font-size: 11px;
   color: var(--muted);
 }
+/* 選択肢に無い値を入れる欄（樹高の「他」） */
+.height-free {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.height-free input {
+  flex: 0 0 76px;
+  width: 76px;
+  text-align: center;
+  padding: 8px 4px !important;
+}
+.height-free .choice-hint {
+  margin-top: 0;
+  flex: 1 1 auto;
+}
+
+/* 周辺環境（道路・園路 / 電線 / 建物 をまとめた小さな囲み） */
+.env-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+  background: #fafbfa;
+}
+.env-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.env-head .choice-label {
+  margin-bottom: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green-dark);
+}
+.env-block .choice-row {
+  margin-bottom: 6px;
+}
+.btn-small {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.btn-on {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
 /* テープ番号は数字だけなので狭くてよい（樹木番号に幅を譲る） */
 .field-tape {
   flex: 0 0 88px;

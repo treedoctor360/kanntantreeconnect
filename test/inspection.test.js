@@ -3,6 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  CAVITY_PART,
+  ENV_ITEMS,
   FUNGUS_PART,
   INSPECTION_FIELDS,
   SURVEY_FIELDS,
@@ -14,6 +16,7 @@ import {
   pickInspection,
   toDateInput,
   togglePart,
+  urgentNotes,
 } from '../src/lib/inspection.js';
 
 test('キノコ部位: 文字列と配列を行き来する', () => {
@@ -93,4 +96,43 @@ test('GAS の trees シート列に、点検内容と調査情報がすべて入
 
 test('キノコ部位の選択肢はシートの1文字表記', () => {
   assert.deepEqual(FUNGUS_PART.map((p) => p.code), ['根', '幹', '枝', '枯', '不']);
+});
+
+
+// --- スプレッドシートで追加された項目（樹高 / 空洞・傷の位置 / 周辺環境） ---
+
+test('空洞・傷の位置は 根 幹 枝 の3つ。並びもその順', () => {
+  assert.deepEqual(CAVITY_PART.map((p) => p.code), ['根', '幹', '枝']);
+  assert.equal(togglePart('枝', '根', CAVITY_PART), '根・枝');
+  assert.equal(hasPart('根・枝', '幹', CAVITY_PART), false);
+});
+
+test('空洞・傷の位置は キノコ部位の選択肢に引きずられない', () => {
+  // '枯' はキノコ部位にしかないので、空洞・傷の位置では落とす
+  assert.deepEqual(partList('根・枯', CAVITY_PART), ['根']);
+  assert.deepEqual(partList('根・枯', FUNGUS_PART), ['根', '枯']);
+});
+
+test('周辺環境は 道路・園路 / 電線 / 建物 の3つ', () => {
+  assert.deepEqual(ENV_ITEMS.map((e) => e.key), ['envRoad', 'envWire', 'envBuilding']);
+});
+
+test('点検内容に樹高と周辺環境が含まれる（GASの列チェックが効くように）', () => {
+  const empty = emptyInspection();
+  for (const key of ['height', 'cavityPart', 'envRoad', 'envWire', 'envBuilding', 'envNote']) {
+    assert.equal(key in empty, true, `${key} が emptyInspection に無い`);
+  }
+});
+
+test('樹高だけ入れても「点検内容あり」と判定する', () => {
+  assert.equal(hasInspection({ height: 8 }), true);
+});
+
+test('すぐ連絡: 空洞・傷「有」＋道路・園路「有」', () => {
+  const notes = urgentNotes({ cavity: '有', envRoad: '有' });
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /道路・園路/);
+  // 片方だけなら出さない
+  assert.deepEqual(urgentNotes({ cavity: '有' }), []);
+  assert.deepEqual(urgentNotes({ envRoad: '有' }), []);
 });
