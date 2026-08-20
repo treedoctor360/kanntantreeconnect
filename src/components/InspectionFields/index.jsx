@@ -8,6 +8,7 @@ import {
   LEAF_DENSITY,
   hasPart,
   togglePart,
+  urgentNotes,
 } from '../../lib/inspection.js';
 import ChoiceRow from './ChoiceRow.jsx';
 
@@ -20,6 +21,7 @@ import ChoiceRow from './ChoiceRow.jsx';
  */
 export default function InspectionFields({ value, onChange }) {
   const set = (key, v) => onChange({ ...value, [key]: v });
+  const urgent = urgentNotes(value);
 
   return (
     <section className="block">
@@ -30,7 +32,7 @@ export default function InspectionFields({ value, onChange }) {
         options={LEAF_DENSITY}
         value={value.leafDensity}
         onChange={(v) => set('leafDensity', v)}
-        hint="濃=茂っている / 普=普通 / ま=空が透けて見える / ほ=葉が殆どない"
+        hint="濃=枝先まで密 / 普=ふつう / ま=まばら（空が透ける）/ ほ=ほとんどない　※迷ったら「普」"
       />
 
       <ChoiceRow
@@ -41,7 +43,7 @@ export default function InspectionFields({ value, onChange }) {
           // 「無」「未」に変えたら部位は消す（紙でも部位は書かないため）
           onChange({ ...value, fungus: v, fungusPart: v === '有' ? value.fungusPart : '' })
         }
-        hint="未=未確認（草や入りにくいところで見られなかった場合）"
+        hint="無=見たが無かった / 未=見ていない・見えない　※必ず区別する"
       />
 
       {value.fungus === '有' && (
@@ -51,7 +53,7 @@ export default function InspectionFields({ value, onChange }) {
           multi
           isOn={(code) => hasPart(value.fungusPart, code)}
           onChange={(code) => set('fungusPart', togglePart(value.fungusPart, code))}
-          hint="複数選べます"
+          hint="複数選べます（根=根元 / 幹=生きた幹 / 枝=枝の付け根 / 枯=枯枝・枯幹 / 不=不明）"
         />
       )}
 
@@ -60,6 +62,7 @@ export default function InspectionFields({ value, onChange }) {
         options={CAVITY}
         value={value.cavity}
         onChange={(v) => set('cavity', v)}
+        hint="穴・樹皮の広範囲な剥離・割れ目。大きさの基準はなし。気になったら「有」"
       />
 
       <ChoiceRow
@@ -67,7 +70,7 @@ export default function InspectionFields({ value, onChange }) {
         options={FRASS}
         value={value.frass}
         onChange={(v) => set('frass', v)}
-        hint="フラス=穿孔性害虫の食いかす"
+        hint="木くずとフンが混ざったうどん状・かりんとう状の排出物。サクラ・ウメ・モモを重点確認"
       />
 
       <label className="field">
@@ -76,9 +79,16 @@ export default function InspectionFields({ value, onChange }) {
           type="text"
           value={value.caution}
           onChange={(e) => set('caution', e.target.value)}
-          placeholder="気になったこと（自由記入）"
+          placeholder="気になった木に印（自由記入）"
         />
       </label>
+
+      {/* 紙の運用ルール4「見つけたらすぐ連絡すること」。その場で気づけるよう出す */}
+      {urgent.map((note) => (
+        <p key={note} className="status status-error">
+          ⚠ {note}
+        </p>
+      ))}
     </section>
   );
 }

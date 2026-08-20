@@ -10,7 +10,8 @@ import {
   isDuplicateTreeNo,
   renameTreeNoPrefix,
   treeNoFromTape,
-  tapeNoFromTreeNo,
+  parseTapeNo,
+  nextTapeNo,
 } from '../src/lib/treeNo.js';
 
 test('公園コード: 空配列なら P001', () => {
@@ -83,6 +84,7 @@ test('公園コード変更時の番号付け替え', () => {
 // --- テープ番号（現地チェックシートの「樹木番号（公園コード+テープ番号）」） ---
 
 test('テープ番号から樹木番号を作る（数字は3桁にそろえる）', () => {
+  assert.equal(treeNoFromTape('P001', 'A201'), 'P001-A201'); // ロール記号付きはそのまま
   assert.equal(treeNoFromTape('P001', '4'), 'P001-004');
   assert.equal(treeNoFromTape('P001', '004'), 'P001-004');
   assert.equal(treeNoFromTape('P001', '128'), 'P001-128');
@@ -99,10 +101,38 @@ test('テープ番号が空なら樹木番号も作らない', () => {
   assert.equal(treeNoFromTape('', '4'), '');
 });
 
-test('樹木番号からテープ番号を取り出す（次の番号の初期値に使う）', () => {
-  assert.equal(tapeNoFromTreeNo('P001-004', 'P001'), '4');
-  assert.equal(tapeNoFromTreeNo('P001-128', 'P001'), '128');
-  // 公園コードが違う／手書きの番号は取り出さない
-  assert.equal(tapeNoFromTreeNo('P002-004', 'P001'), '');
-  assert.equal(tapeNoFromTreeNo('P001-004b', 'P001'), '');
+test('テープ番号をロール記号と連番に分ける', () => {
+  assert.deepEqual(parseTapeNo('A201'), { prefix: 'A', seq: 201 });
+  assert.deepEqual(parseTapeNo('201'), { prefix: '', seq: 201 });
+  assert.deepEqual(parseTapeNo(' a12 '), { prefix: 'A', seq: 12 });
+  assert.equal(parseTapeNo('12b'), null); // 手書きの枝番は採番に混ぜない
+  assert.equal(parseTapeNo(''), null);
+});
+
+// 紙の運用ルール2「ロールは場所をまたいで連続して使う」＝公園で区切らない
+test('次のテープ番号: 同じロール記号の最大値+1', () => {
+  assert.equal(nextTapeNo(['A201', 'A203', 'B7'], 'A'), 'A204');
+});
+
+test('次のテープ番号: 公園が違っても連続する（呼び出し側が全件渡す）', () => {
+  // 真野川で A200 まで使ったら、長沢川は A201 から続く
+  assert.equal(nextTapeNo(['A198', 'A199', 'A200'], 'A'), 'A201');
+});
+
+test('次のテープ番号: そのロールの記録がまだ無ければ 1 から', () => {
+  assert.equal(nextTapeNo([], 'A'), 'A1');
+  assert.equal(nextTapeNo(['A201'], 'B'), 'B1');
+});
+
+test('次のテープ番号: 記号なしで書いている運用はそのまま数字で続ける', () => {
+  assert.equal(nextTapeNo(['201', '202'], 'A'), '203');
+  assert.equal(nextTapeNo(['12'], ''), '13');
+});
+
+test('次のテープ番号: ロール未選択ならいちばん大きい番号の記号に合わせる', () => {
+  assert.equal(nextTapeNo(['A201', 'B7'], ''), 'A202');
+});
+
+test('次のテープ番号: 数字にならない手書きは無視する', () => {
+  assert.equal(nextTapeNo(['A201', 'A12b', ''], 'A'), 'A202');
 });

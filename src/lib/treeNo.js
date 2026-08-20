@@ -27,6 +27,50 @@ export function formatTreeNo(parkCode, seq) {
 }
 
 /**
+ * テープ番号を「ロール記号＋連番」に分ける。
+ * 紙の運用では `A201` のようにロール記号を付けて書く（記号なしの `201` も受ける）。
+ */
+export function parseTapeNo(tapeNo) {
+  const m = /^\s*([A-Za-z]*)\s*(\d+)\s*$/.exec(String(tapeNo ?? ''));
+  return m ? { prefix: m[1].toUpperCase(), seq: parseInt(m[2], 10) } : null;
+}
+
+/**
+ * 次のテープ番号を求める。
+ *
+ * 紙の運用ルール2:「ロールは使い切るまで**場所をまたいで連続して**使う。
+ * 場所ごとに区切らない」。したがって公園では絞らず、端末にあるテープ番号
+ * ぜんぶの最大値 +1 を返す（樹木番号の採番とはここが違う）。
+ *
+ * @param {string[]} existingTapeNos 端末にある全テープ番号
+ * @param {string} roll 選んでいるテープロール（'A'|'B'|'C'）。空でもよい
+ */
+export function nextTapeNo(existingTapeNos = [], roll = '') {
+  const parsed = existingTapeNos.map(parseTapeNo).filter(Boolean);
+  const want = String(roll ?? '').trim().toUpperCase();
+
+  // ロールを選んでいれば、その記号のものだけを見る
+  let pool = want ? parsed.filter((p) => p.prefix === want) : parsed;
+  let prefix = want;
+
+  // その記号の記録がまだ無いなら、記号を書かない運用の続きとみなす
+  if (want && !pool.length) {
+    const plain = parsed.filter((p) => p.prefix === '');
+    if (plain.length) {
+      pool = plain;
+      prefix = '';
+    }
+  }
+  // ロール未選択のときは、いちばん大きい番号の記号に合わせる
+  if (!want) {
+    prefix = pool.reduce((top, p) => (p.seq > (top?.seq ?? -1) ? p : top), null)?.prefix ?? '';
+  }
+
+  const max = pool.reduce((m, p) => Math.max(m, p.seq), 0);
+  return `${prefix}${max + 1}`;
+}
+
+/**
  * テープ番号から樹木番号を作る。
  * 紙のチェックシートの「樹木番号（公園コード+テープ番号）」に合わせる。
  * 数字だけのテープ番号は3桁に揃え、それ以外（'12b' など）はそのまま後ろに付ける。
@@ -35,15 +79,6 @@ export function treeNoFromTape(parkCode, tapeNo) {
   const tape = String(tapeNo ?? '').trim();
   if (!parkCode || !tape) return '';
   return /^\d+$/.test(tape) ? formatTreeNo(parkCode, parseInt(tape, 10)) : `${parkCode}-${tape}`;
-}
-
-/**
- * 樹木番号からテープ番号を取り出す（登録後に次のテープ番号を出すために使う）。
- * 公園コードが一致しなければ空文字。
- */
-export function tapeNoFromTreeNo(treeNo, parkCode) {
-  const seq = parseTreeSeq(treeNo, parkCode);
-  return seq === null ? '' : String(seq);
 }
 
 /**

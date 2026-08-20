@@ -1,6 +1,6 @@
 // 端末内DB（IndexedDB）の定義。Dexie は IndexedDB の薄いラッパー。
 import Dexie from 'dexie';
-import { nextParkCode, nextTreeNo, renameTreeNoPrefix } from '../lib/treeNo.js';
+import { nextParkCode, nextTapeNo, nextTreeNo, renameTreeNoPrefix } from '../lib/treeNo.js';
 import { findParkByName } from '../lib/parkName.js';
 import { emitLocalChange } from '../lib/changeBus.js';
 
@@ -276,6 +276,16 @@ export async function suggestTreeNo(parkId, parkCode) {
   if (!parkId || !parkCode) return '';
   const trees = await db.trees.where('parkId').equals(parkId).toArray();
   return nextTreeNo(parkCode, trees.map((t) => t.treeNo));
+}
+
+/**
+ * 次のテープ番号（14章）。
+ * テープロールは公園をまたいで連続して使うので、**公園で絞らない**。
+ * 樹木番号は公園ごとの採番、テープ番号は端末全体の採番、という違いがある。
+ */
+export async function suggestTapeNo(roll = '') {
+  const trees = await db.trees.toArray();
+  return nextTapeNo(trees.map((t) => t.tapeNo), roll);
 }
 
 /** 同一公園内の重複チェック（selfId の樹木は除く） */

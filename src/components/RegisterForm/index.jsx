@@ -7,11 +7,11 @@ import {
   isTreeNoTaken,
   recordSpeciesUse,
   saveTree,
-  suggestTreeNo,
+  suggestTapeNo,
 } from '../../db/db.js';
 import { makeThumb } from '../../lib/image.js';
 import { emptyInspection, emptySurvey, pickInspection } from '../../lib/inspection.js';
-import { tapeNoFromTreeNo, treeNoFromTape } from '../../lib/treeNo.js';
+import { treeNoFromTape } from '../../lib/treeNo.js';
 import LocationPicker from '../LocationPicker/index.jsx';
 import SpeciesTiles from '../SpeciesTiles/index.jsx';
 import PhotoInput from '../PhotoInput/index.jsx';
@@ -35,6 +35,7 @@ export default function RegisterForm({
 
   const [treeNo, setTreeNo] = useState('');
   const [treeNoEdited, setTreeNoEdited] = useState(false);
+  const [tapeEdited, setTapeEdited] = useState(false); // テープ番号を手で直したか
   const [species, setSpecies] = useState('');
   const [coord, setCoord] = useState(emptyCoord);
   const [photos, setPhotos] = useState([]);
@@ -59,6 +60,7 @@ export default function RegisterForm({
     if (!isEdit) return;
     setTreeNo(editingTree.treeNo ?? '');
     setTreeNoEdited(true);
+    setTapeEdited(true);
     setSpecies(editingTree.species ?? '');
     setCoord({
       lat: editingTree.lat ?? null,
@@ -79,21 +81,22 @@ export default function RegisterForm({
     getTreePhotos(editingTree.id).then((rows) => setPhotos(rows.map((r) => r.dataUrl)));
   }, [isEdit, editingTree]);
 
-  // 新規: 公園が変わったら次の番号（＝次のテープ番号）を出し直す
+  // 新規: 公園やテープロールが変わったら、次のテープ番号と樹木番号を出し直す。
+  // テープロールは公園をまたいで連続して使うので、番号は端末全体から求める（14章）。
   useEffect(() => {
     if (isEdit || !park) return;
     let alive = true;
-    suggestTreeNo(park.id, park.code).then((no) => {
-      if (!alive || treeNoEdited) return;
-      setTreeNo(no);
-      setInspection((v) => ({ ...v, tapeNo: tapeNoFromTreeNo(no, park.code) }));
+    suggestTapeNo(survey.tapeRoll).then((tape) => {
+      if (!alive || tapeEdited) return;
+      setInspection((v) => ({ ...v, tapeNo: tape }));
+      if (!treeNoEdited) setTreeNo(treeNoFromTape(park.code, tape));
     });
     return () => {
       alive = false;
     };
-    // treeNoEdited は依存に入れない（手で直した番号を上書きしないため）
+    // tapeEdited / treeNoEdited は依存に入れない（手で直した番号を上書きしないため）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEdit, park?.id, park?.code]);
+  }, [isEdit, park?.id, park?.code, survey.tapeRoll]);
 
   // 新規: 前回選んだ樹種を初期選択にする
   useEffect(() => {
@@ -140,8 +143,9 @@ export default function RegisterForm({
    */
   const handleInspectionChange = (next) => {
     setInspection(next);
-    if (isEdit || treeNoEdited || !park) return;
     if (next.tapeNo === inspection.tapeNo) return;
+    setTapeEdited(true);
+    if (isEdit || treeNoEdited || !park) return;
     const derived = treeNoFromTape(park.code, next.tapeNo);
     if (derived) setTreeNo(derived);
   };
@@ -154,13 +158,11 @@ export default function RegisterForm({
     setNote('');
     setOptionOpen(false);
     setTreeNoEdited(false);
+    setTapeEdited(false);
     // 点検内容は1本ごとに違うので消す。テープ番号だけは次の番号を入れておく
-    const nextNo = nextPark ? await suggestTreeNo(nextPark.id, nextPark.code) : '';
-    setInspection({
-      ...emptyInspection(),
-      tapeNo: nextPark ? tapeNoFromTreeNo(nextNo, nextPark.code) : '',
-    });
-    if (nextPark) setTreeNo(nextNo);
+    const tape = await suggestTapeNo(survey.tapeRoll);
+    setInspection({ ...emptyInspection(), tapeNo: tape });
+    setTreeNo(nextPark ? treeNoFromTape(nextPark.code, tape) : '');
   };
 
   const handleSave = async () => {
