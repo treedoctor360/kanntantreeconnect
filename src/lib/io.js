@@ -35,8 +35,9 @@ export function buildLightBackup({ parks, trees }) {
 }
 
 // 並びは紙の「樹木点検 現地チェックシート」に合わせてある
-// （場所＝公園名 / テープ番号 / 樹木番号 / 樹種 / 葉の茂り / キノコ / キノコ部位 /
-//   空洞・傷 / フラス / 注意 / 写真）。列を足すときは gas/Code.gs の SHEETS も直すこと。
+// （場所＝公園名 / テープ番号 / 樹木番号 / 樹種 / 樹高 / 葉の茂り / キノコ / キノコ部位 /
+//   空洞・傷 / 空洞・傷の位置 / フラス / 周辺環境（道路園路・電線・建物・備考）/
+//   注意 / 写真）。列を足すときは gas/Code.gs の SHEETS も直すこと。
 const CSV_COLUMNS = [
   ['id', (t) => t.id],
   ['公園コード', (t) => t.parkCode ?? ''],
@@ -44,11 +45,17 @@ const CSV_COLUMNS = [
   ['テープ番号', (t) => t.tapeNo ?? ''],
   ['樹木番号', (t) => t.treeNo ?? ''],
   ['樹種', (t) => t.species ?? ''],
+  ['樹高m', (t) => t.height ?? ''],
   ['葉の茂り', (t) => t.leafDensity ?? ''],
   ['キノコ', (t) => t.fungus ?? ''],
   ['キノコ部位', (t) => t.fungusPart ?? ''],
   ['空洞・傷', (t) => t.cavity ?? ''],
+  ['空洞・傷の位置', (t) => t.cavityPart ?? ''],
   ['フラス', (t) => t.frass ?? ''],
+  ['道路園路', (t) => t.envRoad ?? ''],
+  ['電線', (t) => t.envWire ?? ''],
+  ['建物', (t) => t.envBuilding ?? ''],
+  ['周辺環境備考', (t) => t.envNote ?? ''],
   ['注意', (t) => t.caution ?? ''],
   ['写真枚数', (t) => (t.photoCount == null ? '' : t.photoCount)],
   ['調査日', (t) => t.surveyDate ?? ''],
@@ -58,7 +65,6 @@ const CSV_COLUMNS = [
   ['経度', (t) => (t.lng ?? '') === '' ? '' : String(t.lng)],
   ['誤差m', (t) => (t.accuracy == null ? '' : Math.round(t.accuracy))],
   ['座標入力元', (t) => t.coordSource ?? ''],
-  ['樹高m', (t) => t.height ?? ''],
   ['幹周cm', (t) => t.girth ?? ''],
   ['メモ', (t) => t.note ?? ''],
   ['登録日時', (t) => t.registeredAt ?? ''],
@@ -94,11 +100,17 @@ export function buildGeoJson(trees, parkNameById = {}) {
         treeNo: t.treeNo ?? '',
         species: t.species ?? '',
         // 点検内容（紙のチェックシート1ページ目）
+        height: t.height ?? null,
         leafDensity: t.leafDensity ?? '',
         fungus: t.fungus ?? '',
         fungusPart: t.fungusPart ?? '',
         cavity: t.cavity ?? '',
+        cavityPart: t.cavityPart ?? '',
         frass: t.frass ?? '',
+        envRoad: t.envRoad ?? '',
+        envWire: t.envWire ?? '',
+        envBuilding: t.envBuilding ?? '',
+        envNote: t.envNote ?? '',
         caution: t.caution ?? '',
         photoCount: t.photoCount ?? 0,
         surveyDate: t.surveyDate ?? '',
@@ -106,7 +118,6 @@ export function buildGeoJson(trees, parkNameById = {}) {
         tapeRoll: t.tapeRoll ?? '',
         accuracy: t.accuracy ?? null,
         coordSource: t.coordSource ?? null,
-        height: t.height ?? null,
         girth: t.girth ?? null,
         note: t.note ?? '',
         registeredAt: t.registeredAt ?? null,

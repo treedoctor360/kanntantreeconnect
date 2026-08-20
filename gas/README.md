@@ -129,16 +129,20 @@ URLだけで誰でも書き込める状態が気になる場合。
 | tapeNo | テープ番号 | `12` など |
 | treeNo | 樹木番号 | 公園コード＋テープ番号（`P001-012`） |
 | species | 樹種（不明可） | 樹種和名。`不明` も可 |
+| height | 樹高 | m（数値）。目分量 |
 | leafDensity | 葉の茂り | `濃` `普` `ま` `ほ` |
 | fungus | キノコ | `有` `無` `未` |
 | fungusPart | キノコ部位 | `根` `幹` `枝` `枯` `不`（複数は `根・幹` のように `・` でつなぐ） |
 | cavity | 空洞・傷 | `有` `無` |
+| cavityPart | 空洞・傷の位置 | `根` `幹` `枝`（複数可・`・` でつなぐ） |
 | frass | フラス | `有` `無` `未` |
+| envRoad / envWire / envBuilding | 周辺環境 道路園路 / 電線 / 建物 の有無 | `有` `無` |
+| envNote | 周辺環境 備考欄 | 自由記入 |
 | caution | 注意 | 自由記入 |
 | photoCount | 写真 | 登録した端末での**枚数**（写真そのものは送らない） |
 | surveyDate / surveyor / tapeRoll | 調査日 / 調査者 / テープロール | 表頭の項目。`2026-08-20` / 氏名 / `A` `B` `C` |
 | lat / lng / accuracy / coordSource | — | 座標・誤差(m)・入力元（gps/map/manual/link） |
-| height / girth | — | 樹高(m) / 幹周(cm) |
+| girth | — | 幹周(cm) |
 | note | — | メモ（注意とは別。アプリ側の任意項目） |
 | registeredAt / updatedAt | — | 日時（ISO 8601） |
 

@@ -3,8 +3,9 @@
 // DOM にも DB にも触らない（画面・CSV・GAS のどこからでも同じ定義を使うため）。
 //
 // 紙の並び:
-//   テープ番号 / 樹木番号（公園コード+テープ番号）/ 樹種（不明可）/ 葉の茂り /
-//   キノコ / キノコ部位 / 空洞・傷 / フラス / 注意 / 写真
+//   テープ番号 / 樹木番号（公園コード+テープ番号）/ 樹種（不明可）/ 樹高 / 葉の茂り /
+//   キノコ / キノコ部位 / 空洞・傷 / 空洞・傷の位置 / フラス /
+//   周辺環境（道路園路・電線・建物・備考）/ 注意 / 写真
 //
 // 表頭（1枚のシートで共通の項目）:
 //   場所（＝公園）/ 調査日 / 調査者 / テープロール A・B・C
@@ -42,6 +43,13 @@ export const CAVITY = [
   { code: '無', hint: 'なかった' },
 ];
 
+/** 空洞・傷の位置（複数可）。キノコ部位より粗く、根・幹・枝の3つだけ */
+export const CAVITY_PART = [
+  { code: '根', hint: '根元（地際〜50cm・露出根）' },
+  { code: '幹', hint: '根元より上の生きた幹' },
+  { code: '枝', hint: '枝' },
+];
+
 /** フラス（木くずとフンが混ざったうどん状・かりんとう状の排出物） */
 export const FRASS = [
   { code: '有', hint: 'あった' },
@@ -49,17 +57,39 @@ export const FRASS = [
   { code: '未', hint: '見ていない・見えない' },
 ];
 
+/** 周辺環境（道路園路・電線・建物）。倒れたときに何に当たるかの目安 */
+export const ENV_PRESENCE = [
+  { code: '有', hint: 'ある' },
+  { code: '無', hint: 'ない' },
+];
+
+/** 周辺環境の3項目。ラベルは紙の見出しに合わせる */
+export const ENV_ITEMS = [
+  { key: 'envRoad', label: '道路・園路', hint: '倒れたら道路や園路にかかる' },
+  { key: 'envWire', label: '電線', hint: '枝や幹が電線に近い' },
+  { key: 'envBuilding', label: '建物', hint: '倒れたら建物にかかる' },
+];
+
+/** よく使う樹高（m）。現場では測らないので、目分量で押せるものを並べる */
+export const HEIGHT_PRESETS = [3, 5, 8, 10, 15, 20];
+
 /** テープロール */
 export const TAPE_ROLLS = ['A', 'B', 'C'];
 
 /** 樹木1本ぶんの点検項目（tree に持たせるキー） */
 export const INSPECTION_FIELDS = [
   'tapeNo',
+  'height',
   'leafDensity',
   'fungus',
   'fungusPart',
   'cavity',
+  'cavityPart',
   'frass',
+  'envRoad',
+  'envWire',
+  'envBuilding',
+  'envNote',
   'caution',
 ];
 
@@ -67,32 +97,34 @@ export const INSPECTION_FIELDS = [
 export const SURVEY_FIELDS = ['surveyDate', 'surveyor', 'tapeRoll'];
 
 // ------------------------------------------------------------------
-// キノコ部位（複数可）
+// 部位（複数可）— キノコ部位と空洞・傷の位置で共通に使う
 //
 // 複数選べるが、CSV・スプレッドシート・JSONのどこでも同じ形で扱いたいので
 // 配列ではなく「根・幹」のような文字列1つで持つ。
+// options を渡すとその並び順にそろえる（既定はキノコ部位）。
 // ------------------------------------------------------------------
 
 export const PART_SEP = '・';
 
 /** 保存されている文字列を配列にする（順番はシートの並びにそろえる） */
-export function partList(value) {
+export function partList(value, options = FUNGUS_PART) {
   const chosen = String(value ?? '')
     .split(/[・,、\/\s]+/)
     .filter(Boolean);
-  return FUNGUS_PART.map((p) => p.code).filter((code) => chosen.includes(code));
+  return options.map((p) => p.code).filter((code) => chosen.includes(code));
 }
 
 /** その部位が選ばれているか */
-export function hasPart(value, code) {
-  return partList(value).includes(code);
+export function hasPart(value, code, options = FUNGUS_PART) {
+  return partList(value, options).includes(code);
 }
 
 /** 部位の入切を切り替えた文字列を返す */
-export function togglePart(value, code) {
-  const cur = partList(value);
+export function togglePart(value, code, options = FUNGUS_PART) {
+  const cur = partList(value, options);
   const next = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code];
-  return FUNGUS_PART.map((p) => p.code)
+  return options
+    .map((p) => p.code)
     .filter((c) => next.includes(c))
     .join(PART_SEP);
 }
@@ -105,11 +137,17 @@ export function togglePart(value, code) {
 export function emptyInspection() {
   return {
     tapeNo: '',
+    height: '',
     leafDensity: '',
     fungus: '',
     fungusPart: '',
     cavity: '',
+    cavityPart: '',
     frass: '',
+    envRoad: '',
+    envWire: '',
+    envBuilding: '',
+    envNote: '',
     caution: '',
   };
 }
@@ -158,6 +196,10 @@ export function urgentNotes(v = {}) {
   }
   if (v.fungus === '有' && hasPart(v.fungusPart, '根')) {
     notes.push('根元のキノコ → 大きいものはすぐ連絡すること。');
+  }
+  // 「園路や車道に倒れそうな木」（運用ルール4）に近いので、両方そろったら出す
+  if (v.cavity === '有' && v.envRoad === '有') {
+    notes.push('空洞・傷があり、道路・園路がそば → 倒れたときの影響が大きい。連絡すること。');
   }
   return notes;
 }
