@@ -1,5 +1,11 @@
 /**
- * かんたん樹木登録 — スプレッドシート中継 Web App  v1.0
+ * かんたん樹木登録 — スプレッドシート中継 Web App  v1.1
+ *
+ * v1.0 → v1.1 の変更点
+ *  - 初回リクエストが遅くてタイムアウトするのを直した（書式設定の呼び出しを列ごと→まとめて）
+ *  - ブラウザでURLを開くと自己診断のJSONを返すようにした（doGet）
+ *  - スタンドアロンで作った場合のエラー文を具体的にし、SPREADSHEET_ID にURLも入れられるようにした
+ *  - 1回の実行の中でシートを取り直さないようにした（速度）
  *
  * 役割: アプリ（GitHub Pages）からの POST を受けて、
  *       このスクリプトが紐づくスプレッドシートに公園・樹木を読み書きする。
@@ -36,6 +42,8 @@
  * 既にシートを作ったあとで列を変えた場合は、getSheet_ が見出し行を作り直し、
  * 既存の行を新しい列の位置へ並べ替える（下の ensureHeaders_ 参照）。
  */
+var VERSION = 'v1.1';
+
 var SHEETS = {
   parks: ['id', 'code', 'name', 'lat', 'lng', 'note', 'pid', 'lastUsedAt', 'createdAt', 'updatedAt'],
   trees: [
@@ -90,12 +98,49 @@ function doPost(e) {
   }
 }
 
-/** ブラウザで直接開いたとき用（動作確認のみ） */
+/**
+ * ブラウザで直接開いたとき用の自己診断。
+ * 同期がうまくいかないときは、まずこのURL（末尾 /exec）をブラウザで開くこと。
+ * JSONが出れば中継そのものは動いている。ログイン画面が出たらデプロイの
+ * 「アクセスできるユーザー」が「全員」になっていない。
+ */
 function doGet() {
-  return json_({
-    ok: true,
-    message: 'かんたん樹木登録の中継Web Appです。アプリの設定タブにこのURLを貼り付けてください。',
-  });
+  var out = { ok: true, version: VERSION, checks: {} };
+
+  // 1. スプレッドシートに届いているか
+  try {
+    var ss = book_();
+    out.checks.spreadsheet = { ok: true, name: ss.getName(), id: ss.getId() };
+  } catch (err) {
+    out.ok = false;
+    out.checks.spreadsheet = { ok: false, error: String((err && err.message) || err) };
+    out.hint = 'スプレッドシートに届いていません。上の error のとおりに直してください。';
+    return json_(out);
+  }
+
+  // 2. シートを作れるか（初回はここで parks / trees / deletions ができる）
+  try {
+    var counts = {};
+    Object.keys(SHEETS).forEach(function (name) {
+      counts[name] = Math.max(0, getSheet_(name).getLastRow() - 1);
+    });
+    out.checks.sheets = { ok: true, counts: counts };
+  } catch (err) {
+    out.ok = false;
+    out.checks.sheets = { ok: false, error: String((err && err.message) || err) };
+    out.hint = 'シートを作れませんでした。シートの編集権限を確認してください。';
+    return json_(out);
+  }
+
+  // 3. 合言葉の設定
+  out.checks.token = {
+    required: Boolean(PropertiesService.getScriptProperties().getProperty('SYNC_TOKEN')),
+  };
+
+  out.message =
+    'このJSONが見えていれば中継は動いています。アプリの設定タブに、いま開いているURL' +
+    '（末尾が /exec）をそのまま貼り付けてください。';
+  return json_(out);
 }
 
 // ------------------------------------------------------------------
@@ -147,21 +192,36 @@ function push_(body) {
 // ------------------------------------------------------------------
 
 function book_() {
-  // スプレッドシートに紐づけて作った場合はそのまま使う。
+  if (bookCache_) return bookCache_;
+  // スプレッドシートに紐づけて作った場合（拡張機能 → Apps Script）はそのまま使う。
   // スタンドアロンで作った場合はスクリプトプロパティ SPREADSHEET_ID を見る。
+  // SPREADSHEET_ID にはIDでもシートのURLでも入れてよい。
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  if (id) return SpreadsheetApp.openById(id);
+  if (id) {
+    var m = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(id);
+    bookCache_ = SpreadsheetApp.openById(m ? m[1] : String(id).trim());
+    return bookCache_;
+  }
   var active = SpreadsheetApp.getActiveSpreadsheet();
   if (!active) {
     throw new Error(
-      'スプレッドシートが見つかりません。スクリプトプロパティ SPREADSHEET_ID を設定してください。',
+      'スプレッドシートが見つかりません。このスクリプトがシートに紐づいていない' +
+        '（スタンドアロンで作った）ようです。スプレッドシートを開いて' +
+        '「拡張機能 → Apps Script」から作り直すか、プロジェクトの設定 → スクリプト プロパティで' +
+        ' SPREADSHEET_ID にシートのURLを登録してください。',
     );
   }
-  return active;
+  bookCache_ = active;
+  return bookCache_;
 }
+
+// 1回の実行の中で使い回す控え（同じシートを何度も取りに行かないため）
+var bookCache_ = null;
+var sheetCache_ = {};
 
 /** シートを取り出す（無ければ見出し付きで作る。列が変わっていれば作り直す） */
 function getSheet_(name) {
+  if (sheetCache_[name]) return sheetCache_[name];
   var ss = book_();
   var sheet = ss.getSheetByName(name);
   var headers = SHEETS[name];
@@ -171,18 +231,30 @@ function getSheet_(name) {
   } else {
     ensureHeaders_(sheet, headers);
   }
+  sheetCache_[name] = sheet;
   return sheet;
 }
 
-/** 見出し行を書き、日時が日付型に化けないよう数値列以外を「書式なしテキスト」にする */
+/**
+ * 見出し行を書き、日時が日付型に化けないよう書式を整える。
+ *
+ * 列ごとに setNumberFormat を呼ぶと、1列1000行 × 列数ぶんの書き込みになり、
+ * 初回リクエストだけ極端に遅くなる（アプリ側がタイムアウトする）。
+ * そこで「シート全体を書式なしテキストにしてから、数値列だけ数値に戻す」という
+ * 二段構えにして、呼び出し回数を数回に抑えている。
+ */
 function writeHeaders_(sheet, headers) {
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
-  sheet.setFrozenRows(1);
+  var rows = sheet.getMaxRows();
+  // まとめて「書式なしテキスト」に（ISO日時が日付型に変換されるのを防ぐ）
+  sheet.getRange(1, 1, rows, headers.length).setNumberFormat('@');
+  // 数値として扱う列だけ戻す
   headers.forEach(function (h, i) {
-    if (NUMBER_FIELDS.indexOf(h) < 0) {
-      sheet.getRange(1, i + 1, sheet.getMaxRows(), 1).setNumberFormat('@');
+    if (NUMBER_FIELDS.indexOf(h) >= 0) {
+      sheet.getRange(2, i + 1, rows - 1, 1).setNumberFormat('0.############');
     }
   });
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  sheet.setFrozenRows(1);
 }
 
 /**
