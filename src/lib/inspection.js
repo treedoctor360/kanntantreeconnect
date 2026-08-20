@@ -1,0 +1,168 @@
+// 樹木点検 現地チェックシート（1ページ目）の項目定義。
+// 紙のチェックシートの選択肢をそのまま持つ。ここは純粋なデータと関数だけを置き、
+// DOM にも DB にも触らない（画面・CSV・GAS のどこからでも同じ定義を使うため）。
+//
+// 紙の並び:
+//   テープ番号 / 樹木番号（公園コード+テープ番号）/ 樹種（不明可）/ 葉の茂り /
+//   キノコ / キノコ部位 / 空洞・傷 / フラス / 注意 / 写真
+//
+// 表頭（1枚のシートで共通の項目）:
+//   場所（＝公園）/ 調査日 / 調査者 / テープロール A・B・C
+
+// 以下の hint は紙の「記入ルールと運用」3. 記入の凡例 の文言をそのまま使っている。
+// 紙を直したらここも直すこと（画面・CSV・GASのどこからでもこの定義を見ている）。
+
+/** 葉の茂り。迷ったら「普」 */
+export const LEAF_DENSITY = [
+  { code: '濃', hint: '枝先まで密' },
+  { code: '普', hint: 'ふつう' },
+  { code: 'ま', hint: 'まばら（樹冠から空が透ける）' },
+  { code: 'ほ', hint: 'ほとんどない' },
+];
+
+/** キノコ。「無」と「未」を必ず区別する */
+export const FUNGUS = [
+  { code: '有', hint: 'あった' },
+  { code: '無', hint: '見たが無かった' },
+  { code: '未', hint: '見ていない・下草裏が見えないなどで見えない' },
+];
+
+/** キノコ部位（複数可） */
+export const FUNGUS_PART = [
+  { code: '根', hint: '根元（地際〜50cm・露出根）' },
+  { code: '幹', hint: '根元より上の生きた幹' },
+  { code: '枝', hint: '枝の付け根' },
+  { code: '枯', hint: '枯枝・枯幹' },
+  { code: '不', hint: '不明' },
+];
+
+/** 空洞・傷。大きさの基準は設けない。気になったら「有」でよい */
+export const CAVITY = [
+  { code: '有', hint: '穴・樹皮の広範囲な剥離・割れ目があった' },
+  { code: '無', hint: 'なかった' },
+];
+
+/** フラス（木くずとフンが混ざったうどん状・かりんとう状の排出物） */
+export const FRASS = [
+  { code: '有', hint: 'あった' },
+  { code: '無', hint: '見たが無かった' },
+  { code: '未', hint: '見ていない・見えない' },
+];
+
+/** テープロール */
+export const TAPE_ROLLS = ['A', 'B', 'C'];
+
+/** 樹木1本ぶんの点検項目（tree に持たせるキー） */
+export const INSPECTION_FIELDS = [
+  'tapeNo',
+  'leafDensity',
+  'fungus',
+  'fungusPart',
+  'cavity',
+  'frass',
+  'caution',
+];
+
+/** 調査ごとに共通の項目（表頭。登録のたびに引き継ぐ） */
+export const SURVEY_FIELDS = ['surveyDate', 'surveyor', 'tapeRoll'];
+
+// ------------------------------------------------------------------
+// キノコ部位（複数可）
+//
+// 複数選べるが、CSV・スプレッドシート・JSONのどこでも同じ形で扱いたいので
+// 配列ではなく「根・幹」のような文字列1つで持つ。
+// ------------------------------------------------------------------
+
+export const PART_SEP = '・';
+
+/** 保存されている文字列を配列にする（順番はシートの並びにそろえる） */
+export function partList(value) {
+  const chosen = String(value ?? '')
+    .split(/[・,、\/\s]+/)
+    .filter(Boolean);
+  return FUNGUS_PART.map((p) => p.code).filter((code) => chosen.includes(code));
+}
+
+/** その部位が選ばれているか */
+export function hasPart(value, code) {
+  return partList(value).includes(code);
+}
+
+/** 部位の入切を切り替えた文字列を返す */
+export function togglePart(value, code) {
+  const cur = partList(value);
+  const next = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code];
+  return FUNGUS_PART.map((p) => p.code)
+    .filter((c) => next.includes(c))
+    .join(PART_SEP);
+}
+
+// ------------------------------------------------------------------
+// 出し入れの補助
+// ------------------------------------------------------------------
+
+/** 空の点検内容 */
+export function emptyInspection() {
+  return {
+    tapeNo: '',
+    leafDensity: '',
+    fungus: '',
+    fungusPart: '',
+    cavity: '',
+    frass: '',
+    caution: '',
+  };
+}
+
+/** 樹木レコードから点検内容だけを取り出す（無い項目は空文字） */
+export function pickInspection(tree = {}) {
+  const out = emptyInspection();
+  for (const key of INSPECTION_FIELDS) out[key] = tree?.[key] ?? '';
+  return out;
+}
+
+/** 空の調査情報（表頭）。調査日は今日 */
+export function emptySurvey(today = new Date()) {
+  return { surveyDate: toDateInput(today), surveyor: '', tapeRoll: '' };
+}
+
+/** Date を <input type="date"> の値（YYYY-MM-DD）にする */
+export function toDateInput(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * 一覧に出す注意バッジ。
+ * 「キノコがあった」「空洞・傷があった」「フラスがあった」は現場で拾いたい情報なので、
+ * カードの上で分かるようにする。
+ */
+export function inspectionBadges(tree = {}) {
+  const badges = [];
+  if (tree.fungus === '有') badges.push('キノコ');
+  if (tree.cavity === '有') badges.push('空洞・傷');
+  if (tree.frass === '有') badges.push('フラス');
+  return badges;
+}
+
+/**
+ * 「見つけたらすぐ連絡すること」（紙の運用ルール4）にあたるものを文にして返す。
+ * 現場でその場に立っているうちに気づけるよう、入力した直後に画面へ出す。
+ */
+export function urgentNotes(v = {}) {
+  const notes = [];
+  if (v.frass === '有') {
+    notes.push(
+      'フラス「有」→ 全景と近景（形が分かるように）を撮影し、可能なら持ち帰る。すぐ連絡すること。',
+    );
+  }
+  if (v.fungus === '有' && hasPart(v.fungusPart, '根')) {
+    notes.push('根元のキノコ → 大きいものはすぐ連絡すること。');
+  }
+  return notes;
+}
+
+/** 点検内容が1つでも入っているか（一覧の「点検なし」判定用） */
+export function hasInspection(tree = {}) {
+  return INSPECTION_FIELDS.some((key) => String(tree?.[key] ?? '').trim() !== '');
+}
