@@ -10,7 +10,8 @@
 // GAS の /exec は script.googleusercontent.com へ302リダイレクトする。
 // fetch は既定でリダイレクトを追うので、こちら側の対応は要らない。
 
-const DEFAULT_TIMEOUT = 20000; // 20秒
+// GAS は初回（コールドスタート＋シート作成）だけ十数秒かかることがあるので長めに取る
+const DEFAULT_TIMEOUT = 45000; // 45秒
 
 export class GasError extends Error {
   constructor(message, { kind = 'error' } = {}) {
@@ -40,6 +41,13 @@ export async function callGas(url, payload, { timeout = DEFAULT_TIMEOUT } = {}) 
       { kind: 'config' },
     );
   }
+  if (/\/dev\/?$/.test(endpoint)) {
+    throw new GasError(
+      'URLの末尾が /dev になっています。これは本人しか開けないテスト用URLです。' +
+        '「デプロイ」で作った末尾 /exec のURLを貼り付けてください。',
+      { kind: 'config' },
+    );
+  }
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new GasError('オフラインです。電波の届くところで再度お試しください。', { kind: 'network' });
   }
@@ -57,7 +65,11 @@ export async function callGas(url, payload, { timeout = DEFAULT_TIMEOUT } = {}) 
     });
   } catch (err) {
     if (err?.name === 'AbortError') {
-      throw new GasError('GASの応答がありませんでした（タイムアウト）。', { kind: 'network' });
+      throw new GasError(
+        'GASの応答がありませんでした（タイムアウト）。Web AppのURLをブラウザで開いて、' +
+          'JSONが返るか確かめてください。',
+        { kind: 'network' },
+      );
     }
     throw new GasError(`GASに接続できませんでした（${err?.message ?? err}）。`, { kind: 'network' });
   } finally {
@@ -69,8 +81,10 @@ export async function callGas(url, payload, { timeout = DEFAULT_TIMEOUT } = {}) 
   // アクセス権が「自分だけ」のままだと、JSONではなくGoogleのログインHTMLが返る
   if (/^\s*</.test(text)) {
     throw new GasError(
-      'GASからHTMLが返りました。Web Appのデプロイ設定で「アクセスできるユーザー」を' +
-        '「全員」にして、新しいバージョンとして再デプロイしてください。',
+      'GASからJSONではなくHTML（ログイン画面）が返りました。デプロイ設定の' +
+        '「アクセスできるユーザー」を「全員」にして、' +
+        '「デプロイを管理 → 編集 → 新しいバージョン」で再デプロイしてください。' +
+        'URLの末尾が /exec になっているかも確認してください（/dev では動きません）。',
       { kind: 'auth' },
     );
   }
