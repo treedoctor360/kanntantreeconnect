@@ -36,7 +36,8 @@ export function buildLightBackup({ parks, trees }) {
 
 // 並びは紙の「樹木点検 現地チェックシート」に合わせてある
 // （場所＝公園名 / テープ番号 / 樹木番号 / 樹種 / 樹高 / 葉の茂り / キノコ / キノコ部位 /
-//   空洞・傷 / 空洞・傷の位置 / フラス / 周辺環境（道路園路・電線・建物・備考）/
+//   空洞・傷 / 空洞・傷の位置 / 幹の損傷 / 結合部の異常 / フラス /
+//   周辺環境（道路園路・電線・建物・備考）/
 //   注意 / 写真）。列を足すときは gas/Code.gs の SHEETS も直すこと。
 const CSV_COLUMNS = [
   ['id', (t) => t.id],
@@ -51,6 +52,8 @@ const CSV_COLUMNS = [
   ['キノコ部位', (t) => t.fungusPart ?? ''],
   ['空洞・傷', (t) => t.cavity ?? ''],
   ['空洞・傷の位置', (t) => t.cavityPart ?? ''],
+  ['幹の損傷', (t) => t.trunkDamage ?? ''],
+  ['結合部の異常', (t) => t.barkInclusion ?? ''],
   ['フラス', (t) => t.frass ?? ''],
   ['道路園路', (t) => t.envRoad ?? ''],
   ['電線', (t) => t.envWire ?? ''],
@@ -106,6 +109,8 @@ export function buildGeoJson(trees, parkNameById = {}) {
         fungusPart: t.fungusPart ?? '',
         cavity: t.cavity ?? '',
         cavityPart: t.cavityPart ?? '',
+        trunkDamage: t.trunkDamage ?? '',
+        barkInclusion: t.barkInclusion ?? '',
         frass: t.frass ?? '',
         envRoad: t.envRoad ?? '',
         envWire: t.envWire ?? '',

@@ -200,6 +200,8 @@ export default function RegisterForm({
         fungusPart: inspection.fungusPart,
         cavity: inspection.cavity,
         cavityPart: inspection.cavityPart,
+        trunkDamage: inspection.trunkDamage,
+        barkInclusion: inspection.barkInclusion,
         frass: inspection.frass,
         envRoad: inspection.envRoad,
         envWire: inspection.envWire,
