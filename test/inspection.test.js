@@ -136,3 +136,28 @@ test('すぐ連絡: 空洞・傷「有」＋道路・園路「有」', () => {
   assert.deepEqual(urgentNotes({ cavity: '有' }), []);
   assert.deepEqual(urgentNotes({ envRoad: '有' }), []);
 });
+
+
+// --- 幹の損傷 / 結合部の異常（入り皮） ---
+
+test('幹の損傷と入り皮が点検内容に入っている', () => {
+  const empty = emptyInspection();
+  assert.equal('trunkDamage' in empty, true);
+  assert.equal('barkInclusion' in empty, true);
+  // 並びは紙のとおり 空洞・傷の位置 → 幹の損傷 → 結合部の異常 → フラス
+  const i = (k) => INSPECTION_FIELDS.indexOf(k);
+  assert.ok(i('cavityPart') < i('trunkDamage'));
+  assert.ok(i('trunkDamage') < i('barkInclusion'));
+  assert.ok(i('barkInclusion') < i('frass'));
+});
+
+test('一覧バッジ: 幹の損傷・入り皮も「有」なら出す', () => {
+  assert.deepEqual(inspectionBadges({ trunkDamage: '有' }), ['幹の損傷']);
+  assert.deepEqual(inspectionBadges({ barkInclusion: '有' }), ['入り皮']);
+  assert.deepEqual(
+    inspectionBadges({ fungus: '有', cavity: '有', trunkDamage: '有', barkInclusion: '有', frass: '有' }),
+    ['キノコ', '空洞・傷', '幹の損傷', '入り皮', 'フラス'],
+  );
+  // 「無」では出さない
+  assert.deepEqual(inspectionBadges({ trunkDamage: '無', barkInclusion: '無' }), []);
+});

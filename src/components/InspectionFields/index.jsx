@@ -1,6 +1,7 @@
 // 点検内容（紙の「樹木点検 現地チェックシート」1ページ目の各行の項目）。
 // 並びは紙と同じにしてある。現場で紙と見比べながら入れられるようにするため。
 import {
+  BARK_INCLUSION,
   CAVITY,
   CAVITY_PART,
   ENV_ITEMS,
@@ -10,6 +11,7 @@ import {
   FUNGUS_PART,
   HEIGHT_PRESETS,
   LEAF_DENSITY,
+  TRUNK_DAMAGE,
   hasPart,
   togglePart,
   urgentNotes,
@@ -120,6 +122,22 @@ export default function InspectionFields({ value, onChange }) {
           hint="複数選べます"
         />
       )}
+
+      <ChoiceRow
+        label="幹の損傷"
+        options={TRUNK_DAMAGE}
+        value={value.trunkDamage}
+        onChange={(v) => set('trunkDamage', v)}
+        hint="幹の傷んでいるところ。気になったら「有」"
+      />
+
+      <ChoiceRow
+        label="結合部の異常（入り皮）"
+        options={BARK_INCLUSION}
+        value={value.barkInclusion}
+        onChange={(v) => set('barkInclusion', v)}
+        hint="二又や枝の付け根の合わせ目に樹皮が巻き込まれている（裂けやすい）"
+      />
 
       <ChoiceRow
         label="フラス"

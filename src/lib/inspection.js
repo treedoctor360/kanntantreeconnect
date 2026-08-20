@@ -4,7 +4,7 @@
 //
 // 紙の並び:
 //   テープ番号 / 樹木番号（公園コード+テープ番号）/ 樹種（不明可）/ 樹高 / 葉の茂り /
-//   キノコ / キノコ部位 / 空洞・傷 / 空洞・傷の位置 / フラス /
+//   キノコ / キノコ部位 / 空洞・傷 / 空洞・傷の位置 / 幹の損傷 / 結合部の異常(入り皮) / フラス /
 //   周辺環境（道路園路・電線・建物・備考）/ 注意 / 写真
 //
 // 表頭（1枚のシートで共通の項目）:
@@ -50,6 +50,26 @@ export const CAVITY_PART = [
   { code: '枝', hint: '枝' },
 ];
 
+/**
+ * 幹の損傷。
+ * 【推定】紙の凡例に定義が無いので、いまは「幹の傷んでいるところ」という広い意味で置いている。
+ * 凡例が決まったら hint を直すこと（`有`/`無` の値は変えない）。
+ */
+export const TRUNK_DAMAGE = [
+  { code: '有', hint: 'あった' },
+  { code: '無', hint: 'なかった' },
+];
+
+/**
+ * 結合部の異常（入り皮）。
+ * 入り皮＝二又や枝の付け根の合わせ目に樹皮が巻き込まれた状態。
+ * くっついているように見えて内部で結合しておらず、裂けやすい。
+ */
+export const BARK_INCLUSION = [
+  { code: '有', hint: 'あった' },
+  { code: '無', hint: 'なかった' },
+];
+
 /** フラス（木くずとフンが混ざったうどん状・かりんとう状の排出物） */
 export const FRASS = [
   { code: '有', hint: 'あった' },
@@ -85,6 +105,8 @@ export const INSPECTION_FIELDS = [
   'fungusPart',
   'cavity',
   'cavityPart',
+  'trunkDamage',
+  'barkInclusion',
   'frass',
   'envRoad',
   'envWire',
@@ -143,6 +165,8 @@ export function emptyInspection() {
     fungusPart: '',
     cavity: '',
     cavityPart: '',
+    trunkDamage: '',
+    barkInclusion: '',
     frass: '',
     envRoad: '',
     envWire: '',
@@ -172,13 +196,15 @@ export function toDateInput(d = new Date()) {
 
 /**
  * 一覧に出す注意バッジ。
- * 「キノコがあった」「空洞・傷があった」「フラスがあった」は現場で拾いたい情報なので、
+ * キノコ・空洞・傷・幹の損傷・入り皮・フラスが「有」だったものは現場で拾いたいので、
  * カードの上で分かるようにする。
  */
 export function inspectionBadges(tree = {}) {
   const badges = [];
   if (tree.fungus === '有') badges.push('キノコ');
   if (tree.cavity === '有') badges.push('空洞・傷');
+  if (tree.trunkDamage === '有') badges.push('幹の損傷');
+  if (tree.barkInclusion === '有') badges.push('入り皮');
   if (tree.frass === '有') badges.push('フラス');
   return badges;
 }
