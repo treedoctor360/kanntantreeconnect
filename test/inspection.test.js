@@ -3,11 +3,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  CAVITY,
   CAVITY_PART,
   ENV_ITEMS,
+  FUNGUS,
   FUNGUS_PART,
   INSPECTION_FIELDS,
+  LEAF_DENSITY,
   SURVEY_FIELDS,
+  TREE_FORM,
+  VIGOR,
+  alertLevel,
   emptyInspection,
   hasInspection,
   hasPart,
@@ -53,7 +59,7 @@ test('一覧バッジ: 「有」だったものだけ出す', () => {
   assert.deepEqual(inspectionBadges({ fungus: '有', cavity: '無', frass: '未' }), ['キノコ']);
   assert.deepEqual(inspectionBadges({ fungus: '有', cavity: '有', frass: '有' }), [
     'キノコ',
-    '空洞・傷',
+    '空洞',
     'フラス',
   ]);
   assert.deepEqual(inspectionBadges({}), []);
@@ -95,14 +101,14 @@ test('GAS の trees シート列に、点検内容と調査情報がすべて入
 });
 
 test('キノコ部位の選択肢はシートの1文字表記', () => {
-  assert.deepEqual(FUNGUS_PART.map((p) => p.code), ['根', '幹', '枝', '枯', '不']);
+  assert.deepEqual(FUNGUS_PART.map((p) => p.value), ['根', '幹', '枝', '枯', '不']);
 });
 
 
 // --- スプレッドシートで追加された項目（樹高 / 空洞・傷の位置 / 周辺環境） ---
 
 test('空洞・傷の位置は 根 幹 枝 の3つ。並びもその順', () => {
-  assert.deepEqual(CAVITY_PART.map((p) => p.code), ['根', '幹', '枝']);
+  assert.deepEqual(CAVITY_PART.map((p) => p.value), ['根', '幹', '枝']);
   assert.equal(togglePart('枝', '根', CAVITY_PART), '根・枝');
   assert.equal(hasPart('根・枝', '幹', CAVITY_PART), false);
 });
@@ -138,26 +144,88 @@ test('すぐ連絡: 空洞・傷「有」＋道路・園路「有」', () => {
 });
 
 
-// --- 幹の損傷 / 結合部の異常（入り皮） ---
+// --- 樹幹の揺らぎ/傾斜/亀裂（国交省 主要項目）/ 結合部の異常（入り皮） ---
 
-test('幹の損傷と入り皮が点検内容に入っている', () => {
+test('樹幹の揺らぎ/傾斜/亀裂と入り皮が点検内容に入っている', () => {
   const empty = emptyInspection();
-  assert.equal('trunkDamage' in empty, true);
-  assert.equal('barkInclusion' in empty, true);
-  // 並びは紙のとおり 空洞・傷の位置 → 幹の損傷 → 結合部の異常 → フラス
+  for (const k of ['trunkSway', 'trunkLean', 'trunkCrack', 'barkInclusion']) {
+    assert.equal(k in empty, true, `${k} が emptyInspection に無い`);
+  }
+  // 旧「幹の損傷」は廃止（trunkDamage は無い）
+  assert.equal('trunkDamage' in empty, false);
+  // 並びは国交省の主要項目順: 空洞・傷の位置 → 揺らぎ → 傾斜 → 亀裂 → 入り皮 → フラス
   const i = (k) => INSPECTION_FIELDS.indexOf(k);
-  assert.ok(i('cavityPart') < i('trunkDamage'));
-  assert.ok(i('trunkDamage') < i('barkInclusion'));
+  assert.ok(i('cavityPart') < i('trunkSway'));
+  assert.ok(i('trunkSway') < i('trunkLean'));
+  assert.ok(i('trunkLean') < i('trunkCrack'));
+  assert.ok(i('trunkCrack') < i('barkInclusion'));
   assert.ok(i('barkInclusion') < i('frass'));
 });
 
-test('一覧バッジ: 幹の損傷・入り皮も「有」なら出す', () => {
-  assert.deepEqual(inspectionBadges({ trunkDamage: '有' }), ['幹の損傷']);
+test('活力度（樹勢・樹形）が点検内容に入っている', () => {
+  const empty = emptyInspection();
+  assert.equal('vigor' in empty, true);
+  assert.equal('treeForm' in empty, true);
+  const i = (k) => INSPECTION_FIELDS.indexOf(k);
+  assert.ok(i('frass') < i('vigor'));
+  assert.ok(i('vigor') < i('treeForm'));
+});
+
+test('一覧バッジ: 揺らぎ・傾斜・亀裂・入り皮も「有」なら出す', () => {
+  assert.deepEqual(inspectionBadges({ trunkSway: '有' }), ['揺らぎ']);
+  assert.deepEqual(inspectionBadges({ trunkLean: '有' }), ['傾斜']);
+  assert.deepEqual(inspectionBadges({ trunkCrack: '有' }), ['亀裂']);
   assert.deepEqual(inspectionBadges({ barkInclusion: '有' }), ['入り皮']);
   assert.deepEqual(
-    inspectionBadges({ fungus: '有', cavity: '有', trunkDamage: '有', barkInclusion: '有', frass: '有' }),
-    ['キノコ', '空洞・傷', '幹の損傷', '入り皮', 'フラス'],
+    inspectionBadges({
+      fungus: '有', cavity: '有', trunkSway: '有', trunkLean: '有', trunkCrack: '有',
+      barkInclusion: '有', frass: '有',
+    }),
+    ['キノコ', '空洞', '揺らぎ', '傾斜', '亀裂', '入り皮', 'フラス'],
   );
   // 「無」では出さない
-  assert.deepEqual(inspectionBadges({ trunkDamage: '無', barkInclusion: '無' }), []);
+  assert.deepEqual(inspectionBadges({ trunkCrack: '無', barkInclusion: '無' }), []);
+});
+
+
+// --- コード化（段階は value/label 分離、有無は語のまま）---
+
+test('段階ものの選択肢は value 1〜4 / label は表示用', () => {
+  assert.deepEqual(LEAF_DENSITY.map((o) => o.value), ['1', '2', '3', '4']);
+  assert.deepEqual(VIGOR.map((o) => o.value), ['1', '2', '3', '4']);
+  assert.deepEqual(TREE_FORM.map((o) => o.value), ['1', '2', '3', '4']);
+  // すべての選択肢が value と label を持つ
+  for (const opts of [LEAF_DENSITY, VIGOR, TREE_FORM, FUNGUS, CAVITY, FUNGUS_PART, CAVITY_PART]) {
+    for (const o of opts) {
+      assert.ok(o.value !== undefined && o.value !== '', 'value がある');
+      assert.ok(o.label !== undefined && o.label !== '', 'label がある');
+    }
+  }
+});
+
+test('有/無/未 は語のまま（潰さない）', () => {
+  assert.deepEqual(FUNGUS.map((o) => o.value), ['有', '無', '未']);
+});
+
+
+// --- 重点観察区分（WebGISの色分け用） ---
+
+test('重点観察: キノコ有・フラス有は 3（重点）', () => {
+  assert.equal(alertLevel({ fungus: '有' }), 3);
+  assert.equal(alertLevel({ frass: '有' }), 3);
+  // 重点は注意より優先
+  assert.equal(alertLevel({ fungus: '有', cavity: '有' }), 3);
+});
+
+test('重点観察: 空洞・亀裂・傾斜・揺らぎ・入り皮 有は 2（注意）', () => {
+  assert.equal(alertLevel({ cavity: '有' }), 2);
+  assert.equal(alertLevel({ trunkCrack: '有' }), 2);
+  assert.equal(alertLevel({ trunkLean: '有' }), 2);
+  assert.equal(alertLevel({ trunkSway: '有' }), 2);
+  assert.equal(alertLevel({ barkInclusion: '有' }), 2);
+});
+
+test('重点観察: 所見なし点検済みは 1、未入力は 0', () => {
+  assert.equal(alertLevel({ leafDensity: '2', fungus: '無' }), 1);
+  assert.equal(alertLevel({}), 0);
 });

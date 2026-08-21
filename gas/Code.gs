@@ -32,38 +32,45 @@
 /**
  * シートごとの列。ここに並べた順にそのまま列になる。
  *
- * trees の並びは紙の「樹木点検 現地チェックシート」1ページ目に合わせてある:
- *   場所（parkCode）/ テープ番号 / 樹木番号 / 樹種 / 樹高 / 葉の茂り / キノコ / キノコ部位 /
- *   空洞・傷 / 空洞・傷の位置 / 幹の損傷 / 結合部の異常(入り皮) / フラス /
- *   周辺環境（道路園路・電線・建物・備考）/
+ * trees の並びは国土交通省の樹木点検票(個表)の項目に合わせてある:
+ *   場所（parkCode）/ テープ番号 / 樹木番号 / 樹種 / 重点観察 / 樹高 / 葉の茂り /
+ *   キノコ / キノコ部位 / 空洞・傷 / 空洞・傷の位置 /
+ *   樹幹の揺らぎ / 樹幹の不自然な傾斜 / 樹幹の亀裂 / 結合部の異常(入り皮) / フラス /
+ *   活力度(樹勢・樹形) / 周辺環境（道路園路・電線・建物・備考）/
  *   注意 / 写真（枚数）… に続けて、
  *   表頭の 調査日 / 調査者 / テープロール、そのあとアプリ固有の座標などを置く。
+ *   trunkDamageLegacy は旧「幹の損傷」の退避列（要再確認の目印。新規入力はしない）。
  *
- * 列を変えたら、アプリ側（src/lib/io.js の CSV_COLUMNS・保存処理）と
+ * 段階もの（leafDensity・vigor・treeForm）の値は 1〜4。意味は「凡例」シート/凡例CSVを参照。
+ * alertLevel は重点観察区分（3=重点/2=注意/1=通常/0=未点検）。
+ *
+ * 列を変えたら、アプリ側（src/lib/inspection.js・src/lib/io.js の CSV_COLUMNS・保存処理）と
  * gas/README.md の表も一緒に直すこと。
  * 既にシートを作ったあとで列を変えた場合は、getSheet_ が見出し行を作り直し、
  * 既存の行を新しい列の位置へ並べ替える（下の ensureHeaders_ 参照）。
  */
-var VERSION = 'v1.1';
+var VERSION = 'v1.2';
 
 var SHEETS = {
   parks: ['id', 'code', 'name', 'lat', 'lng', 'note', 'pid', 'lastUsedAt', 'createdAt', 'updatedAt'],
   trees: [
     'id', 'parkId', 'parkCode',
-    'tapeNo', 'treeNo', 'species', 'height',
+    'tapeNo', 'treeNo', 'species', 'alertLevel', 'height',
     'leafDensity', 'fungus', 'fungusPart',
-    'cavity', 'cavityPart', 'trunkDamage', 'barkInclusion', 'frass',
+    'cavity', 'cavityPart',
+    'trunkSway', 'trunkLean', 'trunkCrack', 'barkInclusion', 'frass',
+    'vigor', 'treeForm',
     'envRoad', 'envWire', 'envBuilding', 'envNote',
     'caution', 'photoCount',
     'surveyDate', 'surveyor', 'tapeRoll',
     'lat', 'lng', 'accuracy', 'coordSource',
-    'girth', 'note', 'registeredAt', 'updatedAt',
+    'girth', 'note', 'trunkDamageLegacy', 'registeredAt', 'updatedAt',
   ],
   deletions: ['id', 'table', 'at'],
 };
 
 /** 数値として扱う列。それ以外は文字列（日時がDateに化けないよう書式を「書式なしテキスト」にする） */
-var NUMBER_FIELDS = ['lat', 'lng', 'accuracy', 'height', 'girth', 'photoCount'];
+var NUMBER_FIELDS = ['lat', 'lng', 'accuracy', 'height', 'girth', 'photoCount', 'alertLevel'];
 
 /** アプリと同期する実体のシート（deletions は削除の記録なので別扱い） */
 var DATA_SHEETS = ['parks', 'trees'];

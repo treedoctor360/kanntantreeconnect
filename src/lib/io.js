@@ -1,5 +1,7 @@
 // バックアップ（JSON）・書き出し（CSV / GeoJSON）と、取込のマージ計画。
 
+import { ALERT_LABELS, LEAF_DENSITY, TREE_FORM, VIGOR } from './inspection.js';
+
 export const BACKUP_FORMAT = 'kantantree-backup';
 export const BACKUP_VERSION = 1;
 
@@ -34,11 +36,10 @@ export function buildLightBackup({ parks, trees }) {
   };
 }
 
-// 並びは紙の「樹木点検 現地チェックシート」に合わせてある
-// （場所＝公園名 / テープ番号 / 樹木番号 / 樹種 / 樹高 / 葉の茂り / キノコ / キノコ部位 /
-//   空洞・傷 / 空洞・傷の位置 / 幹の損傷 / 結合部の異常 / フラス /
-//   周辺環境（道路園路・電線・建物・備考）/
-//   注意 / 写真）。列を足すときは gas/Code.gs の SHEETS も直すこと。
+// 並びは国交省様式・紙のチェックシートに合わせてある。
+// 段階もの（葉の茂り・活力度）は値が 1〜4 なので、別途「凡例」を buildLegendCsv で出す。
+// 「重点観察」は WebGIS の色分け用の派生値（3=重点/2=注意/1=通常/0=未点検）。
+// 列を足すときは gas/Code.gs の SHEETS も直すこと。
 const CSV_COLUMNS = [
   ['id', (t) => t.id],
   ['公園コード', (t) => t.parkCode ?? ''],
@@ -46,15 +47,20 @@ const CSV_COLUMNS = [
   ['テープ番号', (t) => t.tapeNo ?? ''],
   ['樹木番号', (t) => t.treeNo ?? ''],
   ['樹種', (t) => t.species ?? ''],
+  ['重点観察', (t) => (t.alertLevel == null ? '' : t.alertLevel)],
   ['樹高m', (t) => t.height ?? ''],
   ['葉の茂り', (t) => t.leafDensity ?? ''],
   ['キノコ', (t) => t.fungus ?? ''],
   ['キノコ部位', (t) => t.fungusPart ?? ''],
   ['空洞・傷', (t) => t.cavity ?? ''],
   ['空洞・傷の位置', (t) => t.cavityPart ?? ''],
-  ['幹の損傷', (t) => t.trunkDamage ?? ''],
+  ['樹幹の揺らぎ', (t) => t.trunkSway ?? ''],
+  ['樹幹の不自然な傾斜', (t) => t.trunkLean ?? ''],
+  ['樹幹の亀裂', (t) => t.trunkCrack ?? ''],
   ['結合部の異常', (t) => t.barkInclusion ?? ''],
   ['フラス', (t) => t.frass ?? ''],
+  ['活力度_樹勢', (t) => t.vigor ?? ''],
+  ['活力度_樹形', (t) => t.treeForm ?? ''],
   ['道路園路', (t) => t.envRoad ?? ''],
   ['電線', (t) => t.envWire ?? ''],
   ['建物', (t) => t.envBuilding ?? ''],
@@ -70,6 +76,7 @@ const CSV_COLUMNS = [
   ['座標入力元', (t) => t.coordSource ?? ''],
   ['幹周cm', (t) => t.girth ?? ''],
   ['メモ', (t) => t.note ?? ''],
+  ['幹の損傷_旧', (t) => t.trunkDamageLegacy ?? ''],
   ['登録日時', (t) => t.registeredAt ?? ''],
   ['更新日時', (t) => t.updatedAt ?? ''],
 ];
@@ -88,6 +95,25 @@ export function buildCsv(trees, parkNameById = {}) {
   return '﻿' + [header, ...rows].join('\r\n') + '\r\n';
 }
 
+/**
+ * 凡例CSV。段階もの（1〜4）や重点観察区分の意味を別ファイルで添える。
+ * 本体CSVに凡例行を混ぜると機械取込が壊れるため、凡例は別に出す。
+ */
+export function buildLegendCsv() {
+  const rows = [['項目', '値', '意味']];
+  const push = (name, options) => {
+    for (const o of options) rows.push([name, o.value, o.hint ?? o.label]);
+  };
+  push('葉の茂り', LEAF_DENSITY);
+  push('活力度_樹勢', VIGOR);
+  push('活力度_樹形', TREE_FORM);
+  for (const [value, label] of Object.entries(ALERT_LABELS)) {
+    rows.push(['重点観察', value, label]);
+  }
+  const body = rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+  return '﻿' + body + '\r\n';
+}
+
 /** GeoJSON（座標のある樹木だけ） */
 export function buildGeoJson(trees, parkNameById = {}) {
   const features = trees
@@ -102,16 +128,22 @@ export function buildGeoJson(trees, parkNameById = {}) {
         tapeNo: t.tapeNo ?? '',
         treeNo: t.treeNo ?? '',
         species: t.species ?? '',
-        // 点検内容（紙のチェックシート1ページ目）
+        // 重点観察区分（WebGISの色分け用。3=重点/2=注意/1=通常/0=未点検）
+        alertLevel: t.alertLevel ?? 0,
+        // 点検内容（国交省様式）
         height: t.height ?? null,
         leafDensity: t.leafDensity ?? '',
         fungus: t.fungus ?? '',
         fungusPart: t.fungusPart ?? '',
         cavity: t.cavity ?? '',
         cavityPart: t.cavityPart ?? '',
-        trunkDamage: t.trunkDamage ?? '',
+        trunkSway: t.trunkSway ?? '',
+        trunkLean: t.trunkLean ?? '',
+        trunkCrack: t.trunkCrack ?? '',
         barkInclusion: t.barkInclusion ?? '',
         frass: t.frass ?? '',
+        vigor: t.vigor ?? '',
+        treeForm: t.treeForm ?? '',
         envRoad: t.envRoad ?? '',
         envWire: t.envWire ?? '',
         envBuilding: t.envBuilding ?? '',
