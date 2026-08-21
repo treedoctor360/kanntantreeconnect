@@ -1,86 +1,119 @@
-// 樹木点検 現地チェックシート（1ページ目）の項目定義。
-// 紙のチェックシートの選択肢をそのまま持つ。ここは純粋なデータと関数だけを置き、
+// 樹木点検票の項目定義。ここは純粋なデータと関数だけを置き、
 // DOM にも DB にも触らない（画面・CSV・GAS のどこからでも同じ定義を使うため）。
 //
-// 紙の並び:
-//   テープ番号 / 樹木番号（公園コード+テープ番号）/ 樹種（不明可）/ 樹高 / 葉の茂り /
-//   キノコ / キノコ部位 / 空洞・傷 / 空洞・傷の位置 / 幹の損傷 / 結合部の異常(入り皮) / フラス /
-//   周辺環境（道路園路・電線・建物・備考）/ 注意 / 写真
+// 文言は国土交通省「都市公園の樹木の点検・診断に関する指針(案)」の樹木点検票(個表)に
+// 可能な限り合わせている（出典: https://www.mlit.go.jp/toshi/park/content/001414803.pdf）。
 //
-// 表頭（1枚のシートで共通の項目）:
-//   場所（＝公園）/ 調査日 / 調査者 / テープロール A・B・C
+// ------------------------------------------------------------------
+// コード化の原則（2026-08-21 決定）
+//   - 段階もの（順序に意味がある: 葉の茂り・活力度）は保存値を '1'〜'4' にする。
+//     1 = 良い/充実 側にそろえる（国交省の活力度に合わせる）。
+//   - 状態もの（有/無/未）は語のまま保存する。「未（見ていない）」を潰さないため。
+//   - 選択肢は { value, label, hint } の3点で持つ。
+//       value … 保存・CSV・シートに出る値（不変にしたい）
+//       label … 画面のボタンに出る表示（あとで変えてよい）
+//       hint  … 補足説明
+//     こうすると表示ラベルを変えても保存値は動かない。
+// ------------------------------------------------------------------
 
-// 以下の hint は紙の「記入ルールと運用」3. 記入の凡例 の文言をそのまま使っている。
-// 紙を直したらここも直すこと（画面・CSV・GASのどこからでもこの定義を見ている）。
-
-/** 葉の茂り。迷ったら「普」 */
+/** 葉の茂り。1＝充実 側。※国交省様式に対応項目は無い（現場の目安として存置） */
 export const LEAF_DENSITY = [
-  { code: '濃', hint: '枝先まで密' },
-  { code: '普', hint: 'ふつう' },
-  { code: 'ま', hint: 'まばら（樹冠から空が透ける）' },
-  { code: 'ほ', hint: 'ほとんどない' },
+  { value: '1', label: '濃', hint: '枝先まで密' },
+  { value: '2', label: '普', hint: 'ふつう' },
+  { value: '3', label: 'ま', hint: 'まばら（樹冠から空が透ける）' },
+  { value: '4', label: 'ほ', hint: 'ほとんどない' },
 ];
 
-/** キノコ。「無」と「未」を必ず区別する */
+/** キノコ（国交省: 樹幹・大枝・地際のキノコ）。「無」と「未」を必ず区別する */
 export const FUNGUS = [
-  { code: '有', hint: 'あった' },
-  { code: '無', hint: '見たが無かった' },
-  { code: '未', hint: '見ていない・下草裏が見えないなどで見えない' },
+  { value: '有', label: '有', hint: 'あった' },
+  { value: '無', label: '無', hint: '見たが無かった' },
+  { value: '未', label: '未', hint: '見ていない・下草裏が見えないなどで見えない' },
 ];
 
-/** キノコ部位（複数可） */
+/** キノコ部位（複数可）。値は語のまま（根/幹/枝/枯/不） */
 export const FUNGUS_PART = [
-  { code: '根', hint: '根元（地際〜50cm・露出根）' },
-  { code: '幹', hint: '根元より上の生きた幹' },
-  { code: '枝', hint: '枝の付け根' },
-  { code: '枯', hint: '枯枝・枯幹' },
-  { code: '不', hint: '不明' },
-];
-
-/** 空洞・傷。大きさの基準は設けない。気になったら「有」でよい */
-export const CAVITY = [
-  { code: '有', hint: '穴・樹皮の広範囲な剥離・割れ目があった' },
-  { code: '無', hint: 'なかった' },
-];
-
-/** 空洞・傷の位置（複数可）。キノコ部位より粗く、根・幹・枝の3つだけ */
-export const CAVITY_PART = [
-  { code: '根', hint: '根元（地際〜50cm・露出根）' },
-  { code: '幹', hint: '根元より上の生きた幹' },
-  { code: '枝', hint: '枝' },
+  { value: '根', label: '根', hint: '根元（地際〜50cm・露出根）' },
+  { value: '幹', label: '幹', hint: '根元より上の生きた幹' },
+  { value: '枝', label: '枝', hint: '枝の付け根' },
+  { value: '枯', label: '枯', hint: '枯枝・枯幹' },
+  { value: '不', label: '不', hint: '不明' },
 ];
 
 /**
- * 幹の損傷。
- * 【推定】紙の凡例に定義が無いので、いまは「幹の傷んでいるところ」という広い意味で置いている。
- * 凡例が決まったら hint を直すこと（`有`/`無` の値は変えない）。
+ * 空洞・傷。国交省「樹幹の亀裂」と切り分けるため、ここは
+ * 「穴（空洞）・樹皮の広範囲な剥離」に限定する（割れ目・裂けは trunkCrack へ）。
  */
-export const TRUNK_DAMAGE = [
-  { code: '有', hint: 'あった' },
-  { code: '無', hint: 'なかった' },
+export const CAVITY = [
+  { value: '有', label: '有', hint: '穴（空洞）・樹皮の広範囲な剥離があった' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/** 空洞・傷の位置（複数可）。根・幹・枝の3つ */
+export const CAVITY_PART = [
+  { value: '根', label: '根', hint: '根元（地際〜50cm・露出根）' },
+  { value: '幹', label: '幹', hint: '根元より上の生きた幹' },
+  { value: '枝', label: '枝', hint: '枝' },
+];
+
+/** 樹幹の揺らぎ（国交省 主要項目）。押すと動く＝倒木直前のサイン */
+export const TRUNK_SWAY = [
+  { value: '有', label: '有', hint: '幹を押すと根鉢ごと動く・地際が浮く' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/** 樹幹の不自然な傾斜（国交省 主要項目） */
+export const TRUNK_LEAN = [
+  { value: '有', label: '有', hint: '近年傾いた・根元が持ち上がる等の不自然な傾き' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/** 樹幹の亀裂（国交省 主要項目）。旧「幹の損傷」を整理してここに寄せた */
+export const TRUNK_CRACK = [
+  { value: '有', label: '有', hint: '幹の割れ目・裂け・縦の亀裂があった' },
+  { value: '無', label: '無', hint: 'なかった' },
 ];
 
 /**
  * 結合部の異常（入り皮）。
- * 入り皮＝二又や枝の付け根の合わせ目に樹皮が巻き込まれた状態。
- * くっついているように見えて内部で結合しておらず、裂けやすい。
+ * 入り皮＝二又や枝の付け根の合わせ目に樹皮が巻き込まれた状態。裂けやすい。
+ * ※国交省様式に対応項目は無い（現場で拾いたいので存置）。
  */
 export const BARK_INCLUSION = [
-  { code: '有', hint: 'あった' },
-  { code: '無', hint: 'なかった' },
+  { value: '有', label: '有', hint: 'あった' },
+  { value: '無', label: '無', hint: 'なかった' },
 ];
 
-/** フラス（木くずとフンが混ざったうどん状・かりんとう状の排出物） */
+/** フラス（木くずとフンが混ざったうどん状・かりんとう状の排出物）。※国交省様式に対応項目は無い */
 export const FRASS = [
-  { code: '有', hint: 'あった' },
-  { code: '無', hint: '見たが無かった' },
-  { code: '未', hint: '見ていない・見えない' },
+  { value: '有', label: '有', hint: 'あった' },
+  { value: '無', label: '無', hint: '見たが無かった' },
+  { value: '未', label: '未', hint: '見ていない・見えない' },
+];
+
+/**
+ * 活力度・樹勢（国交省）。段階の説明は指針p.25の文言。1＝良い。
+ * ※印刷版の指針原文で最終照合すること（保存値 1〜4 は照合結果に関わらず不変）。
+ */
+export const VIGOR = [
+  { value: '1', label: '1', hint: '良い' },
+  { value: '2', label: '2', hint: '少し悪い' },
+  { value: '3', label: '3', hint: '悪い' },
+  { value: '4', label: '4', hint: '枯死（ナラ枯れ・マツ枯れ等）' },
+];
+
+/** 活力度・樹形（国交省）。段階の説明は指針p.25の文言。1＝良い */
+export const TREE_FORM = [
+  { value: '1', label: '1', hint: '望ましい樹形を保っている' },
+  { value: '2', label: '2', hint: '樹形に乱れがある' },
+  { value: '3', label: '3', hint: '樹形が著しく乱れ、回復の見込みが低い' },
+  { value: '4', label: '4', hint: '望ましい樹形が完全に崩壊している' },
 ];
 
 /** 周辺環境（道路園路・電線・建物）。倒れたときに何に当たるかの目安 */
 export const ENV_PRESENCE = [
-  { code: '有', hint: 'ある' },
-  { code: '無', hint: 'ない' },
+  { value: '有', label: '有', hint: 'ある' },
+  { value: '無', label: '無', hint: 'ない' },
 ];
 
 /** 周辺環境の3項目。ラベルは紙の見出しに合わせる */
@@ -96,7 +129,11 @@ export const HEIGHT_PRESETS = [3, 5, 8, 10, 15, 20];
 /** テープロール */
 export const TAPE_ROLLS = ['A', 'B', 'C'];
 
-/** 樹木1本ぶんの点検項目（tree に持たせるキー） */
+/**
+ * 樹木1本ぶんの点検項目（tree に持たせるキー）。
+ * 並びは国交省の主要項目（揺らぎ→傾斜→亀裂→キノコ）と活力度をふまえつつ、
+ * 現場で入れやすい流れにそろえている。
+ */
 export const INSPECTION_FIELDS = [
   'tapeNo',
   'height',
@@ -105,9 +142,13 @@ export const INSPECTION_FIELDS = [
   'fungusPart',
   'cavity',
   'cavityPart',
-  'trunkDamage',
+  'trunkSway',
+  'trunkLean',
+  'trunkCrack',
   'barkInclusion',
   'frass',
+  'vigor',
+  'treeForm',
   'envRoad',
   'envWire',
   'envBuilding',
@@ -133,7 +174,7 @@ export function partList(value, options = FUNGUS_PART) {
   const chosen = String(value ?? '')
     .split(/[・,、\/\s]+/)
     .filter(Boolean);
-  return options.map((p) => p.code).filter((code) => chosen.includes(code));
+  return options.map((p) => p.value).filter((v) => chosen.includes(v));
 }
 
 /** その部位が選ばれているか */
@@ -146,8 +187,8 @@ export function togglePart(value, code, options = FUNGUS_PART) {
   const cur = partList(value, options);
   const next = cur.includes(code) ? cur.filter((c) => c !== code) : [...cur, code];
   return options
-    .map((p) => p.code)
-    .filter((c) => next.includes(c))
+    .map((p) => p.value)
+    .filter((v) => next.includes(v))
     .join(PART_SEP);
 }
 
@@ -165,9 +206,13 @@ export function emptyInspection() {
     fungusPart: '',
     cavity: '',
     cavityPart: '',
-    trunkDamage: '',
+    trunkSway: '',
+    trunkLean: '',
+    trunkCrack: '',
     barkInclusion: '',
     frass: '',
+    vigor: '',
+    treeForm: '',
     envRoad: '',
     envWire: '',
     envBuilding: '',
@@ -196,18 +241,39 @@ export function toDateInput(d = new Date()) {
 
 /**
  * 一覧に出す注意バッジ。
- * キノコ・空洞・傷・幹の損傷・入り皮・フラスが「有」だったものは現場で拾いたいので、
- * カードの上で分かるようにする。
+ * 「有」だったものは現場で拾いたいので、カードの上で分かるようにする。
  */
 export function inspectionBadges(tree = {}) {
   const badges = [];
   if (tree.fungus === '有') badges.push('キノコ');
-  if (tree.cavity === '有') badges.push('空洞・傷');
-  if (tree.trunkDamage === '有') badges.push('幹の損傷');
+  if (tree.cavity === '有') badges.push('空洞');
+  if (tree.trunkSway === '有') badges.push('揺らぎ');
+  if (tree.trunkLean === '有') badges.push('傾斜');
+  if (tree.trunkCrack === '有') badges.push('亀裂');
   if (tree.barkInclusion === '有') badges.push('入り皮');
   if (tree.frass === '有') badges.push('フラス');
   return badges;
 }
+
+/**
+ * 重点観察区分（WebGISの色分け用）。危険度・診断結果ではなく「観察の優先度」。
+ *   3 = 重点（赤）… キノコ有 または フラス有（菌・虫の活動サイン）
+ *   2 = 注意（黄）… 空洞・亀裂・傾斜・揺らぎ・入り皮 のいずれか有
+ *   1 = 通常（緑）… 上記なし・点検済み
+ *   0 = 未   （灰）… 点検項目が未入力（実質、見ていない）
+ * 生の項目は消さず、この区分は派生値として出す。
+ */
+export function alertLevel(tree = {}) {
+  const yes = (k) => tree?.[k] === '有';
+  if (yes('fungus') || yes('frass')) return 3;
+  if (yes('cavity') || yes('trunkCrack') || yes('trunkLean') || yes('trunkSway') || yes('barkInclusion')) {
+    return 2;
+  }
+  return hasInspection(tree) ? 1 : 0;
+}
+
+/** 重点観察区分の表示名（凡例・ツール表示用） */
+export const ALERT_LABELS = { 3: '重点', 2: '注意', 1: '通常', 0: '未点検' };
 
 /**
  * 「見つけたらすぐ連絡すること」（紙の運用ルール4）にあたるものを文にして返す。
@@ -234,3 +300,16 @@ export function urgentNotes(v = {}) {
 export function hasInspection(tree = {}) {
   return INSPECTION_FIELDS.some((key) => String(tree?.[key] ?? '').trim() !== '');
 }
+
+/**
+ * 保存値（value）から表示ラベルを引く。
+ * 段階もの（1〜4）を一覧などで人が読める形に戻すために使う。
+ * 該当が無ければ元の値をそのまま返す（旧データや未知値でも壊れない）。
+ */
+export function labelOf(options, value) {
+  const hit = options.find((o) => o.value === value);
+  return hit ? hit.label : String(value ?? '');
+}
+
+/** 葉の茂りの表示ラベル（例: '2' → '普'） */
+export const leafDensityLabel = (value) => labelOf(LEAF_DENSITY, value);

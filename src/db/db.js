@@ -3,6 +3,7 @@ import Dexie from 'dexie';
 import { nextParkCode, nextTapeNo, nextTreeNo, renameTreeNoPrefix } from '../lib/treeNo.js';
 import { findParkByName } from '../lib/parkName.js';
 import { emitLocalChange } from '../lib/changeBus.js';
+import { alertLevel } from '../lib/inspection.js';
 
 export const db = new Dexie('kantantree');
 
@@ -24,6 +25,57 @@ db.version(2).stores({
   pending: 'id, table',
   deletions: 'id, table, at',
 });
+
+// v3: 国交省様式に合わせた点検項目の再設計に伴うデータ移行。
+//   - 葉の茂り（leafDensity）を段階記号 濃/普/ま/ほ → 数値 1/2/3/4 に変換
+//   - 旧「幹の損傷」（trunkDamage・定義が曖昧）は消さずに trunkDamageLegacy へ退避。
+//     新項目 樹幹の亀裂/傾斜/揺らぎ は、亀裂か傾斜かを旧値から機械的に判定できないため
+//     **推測で振り分けず空欄のまま**にする（trunkDamageLegacy に値がある＝要再確認）。
+// 索引（stores）は v2 と同じ。ここでは中身だけ書き換える。
+db.version(3)
+  .stores({
+    parks: 'id, code, name, lastUsedAt',
+    trees: 'id, parkId, treeNo, species, updatedAt, [parkId+treeNo]',
+    photos: 'id, treeId',
+    settings: 'key',
+    pending: 'id, table',
+    deletions: 'id, table, at',
+  })
+  .upgrade(async (tx) => {
+    const LEAF_MAP = { 濃: '1', 普: '2', ま: '3', ほ: '4' };
+    const trees = await tx.table('trees').toArray();
+    const touched = [];
+    for (const t of trees) {
+      let changed = false;
+      if (t.leafDensity && LEAF_MAP[t.leafDensity]) {
+        t.leafDensity = LEAF_MAP[t.leafDensity];
+        changed = true;
+      }
+      if (t.trunkDamage != null && t.trunkDamage !== '') {
+        t.trunkDamageLegacy = t.trunkDamage; // 旧「幹の損傷」を退避（要再確認の目印）
+        changed = true;
+      }
+      if ('trunkDamage' in t) {
+        delete t.trunkDamage;
+        changed = true;
+      }
+      // 派生値（重点観察区分）を新項目基準で付け直す
+      const lvl = alertLevel(t);
+      if (t.alertLevel !== lvl) {
+        t.alertLevel = lvl;
+        changed = true;
+      }
+      if (changed) {
+        await tx.table('trees').put(t);
+        touched.push(t.id);
+      }
+    }
+    // 変換したレコードはシートへ送り直す（新しい列構成で上書きされる）
+    if (touched.length) {
+      const at = new Date().toISOString();
+      await tx.table('pending').bulkPut(touched.map((id) => ({ id, table: 'trees', at })));
+    }
+  });
 
 /** UUID を作る（crypto.randomUUID が無い環境向けの控えも用意） */
 export function uid() {
@@ -308,6 +360,8 @@ export async function saveTree(tree, photoDataUrls = []) {
     registeredAt: tree.registeredAt ?? t,
     updatedAt: t,
   };
+  // 重点観察区分（WebGISの色分け用）は保存のたびに付け直す＝行と常に整合する
+  record.alertLevel = alertLevel(record);
   await db.transaction('rw', db.trees, db.photos, db.parks, db.pending, async () => {
     await db.trees.put(record);
     await markPending('trees', record.id);
@@ -327,6 +381,16 @@ export async function saveTree(tree, photoDataUrls = []) {
   });
   emitLocalChange('saveTree');
   return record;
+}
+
+/**
+ * 移行で「要再確認」になった樹木を返す。
+ * 旧「幹の損傷=有」だった木は、亀裂か傾斜かを機械判定できないため
+ * trunkDamageLegacy に旧値を退避してある。次の巡回で亀裂/傾斜を入れ直す対象。
+ */
+export async function treesNeedingRecheck() {
+  const trees = await db.trees.toArray();
+  return trees.filter((t) => t.trunkDamageLegacy != null && t.trunkDamageLegacy !== '');
 }
 
 export async function getTreePhotos(treeId) {
