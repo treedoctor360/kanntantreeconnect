@@ -2,7 +2,7 @@
  * かんたん樹木登録 — スプレッドシート中継 Web App  v1.4
  *
  * v1.3 → v1.4 の変更点
- *  - PLATEAU移行に備えた任意項目を追加（crownWidth 樹冠幅 / vegClass 区分 / girthHeight 幹周測定高）
+ *  - PLATEAU移行に備えた任意項目を追加（crownWidth 樹冠幅 / vegClass 区分）
  *
  * v1.2 → v1.3 の変更点
  *  - 点検履歴 tree_history シートを追加（追記のみ）。同じ木を2回目に点検しても
@@ -75,7 +75,7 @@ var SHEETS = {
     'caution', 'photoCount',
     'surveyDate', 'surveyor', 'tapeRoll',
     'lat', 'lng', 'accuracy', 'coordSource',
-    'girth', 'girthHeight', 'note', 'trunkDamageLegacy', 'registeredAt', 'updatedAt',
+    'girth', 'note', 'trunkDamageLegacy', 'registeredAt', 'updatedAt',
   ],
   deletions: ['id', 'table', 'at'],
 };
@@ -100,7 +100,6 @@ SHEETS.tree_history = ['historyId', 'recordedAt'].concat(SHEETS.trees);
 var NUMBER_FIELDS = [
   'lat', 'lng', 'accuracy', 'height', 'crownWidth', 'girth', 'photoCount', 'alertLevel',
 ];
-// girthHeight は '1.2' のほか '根元' も入るので文字列のまま（数値列にしない）
 
 /**
  * アプリと同期する実体のシート。

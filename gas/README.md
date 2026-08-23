@@ -152,7 +152,6 @@ URLだけで誰でも書き込める状態が気になる場合。
 | surveyDate / surveyor / tapeRoll | 調査日 / 調査者 / テープロール | 表頭の項目。`2026-08-20` / 氏名 / `A` `B` `C` |
 | lat / lng / accuracy / coordSource | — | 座標・誤差(m)・入力元（gps/map/manual/link） |
 | girth | — | 幹周(cm) |
-| girthHeight | — | 幹周の測定高。`1.2`（大津市の運用＝胸高）/ `1.3` / `根元` / `その他`。**数値列にしない** |
 | note | — | メモ（注意とは別。アプリ側の任意項目） |
 | trunkDamageLegacy | — | 旧「幹の損傷」の退避列（要再確認の目印。新規入力はしない） |
 | registeredAt / updatedAt | — | 日時（ISO 8601） |
