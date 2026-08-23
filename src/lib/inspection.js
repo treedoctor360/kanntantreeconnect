@@ -139,22 +139,6 @@ export const VEG_CLASS = [
   { value: '低木', label: '低木', hint: 'おおむね1.5m未満' },
 ];
 
-/**
- * 幹周の測定高。**大津市の運用は地上高 1.2m（日本の「胸高」）**。
- *
- * 測定高が分からない幹周は、あとから比較できず診断根拠として使えなくなる。
- * 遡って調べようがないので、幹周を入れたときは必ず一緒に残す
- * （幹周を入力すると 1.2 が自動で入る。違う高さで測ったときだけ押し替える）。
- */
-export const GIRTH_HEIGHT = [
-  { value: '1.2', label: '1.2m', hint: '胸高（日本の標準・大津市の運用）' },
-  { value: '1.3', label: '1.3m', hint: '国際的なDBHの測定高' },
-  { value: '根元', label: '根元', hint: '地際で測った' },
-  { value: 'その他', label: 'その他', hint: '上のいずれでもない（メモに書く）' },
-];
-
-/** 幹周を入れたときに既定で入る測定高 */
-export const DEFAULT_GIRTH_HEIGHT = '1.2';
 
 /** テープロール */
 export const TAPE_ROLLS = ['A', 'B', 'C'];
@@ -185,7 +169,6 @@ export const INSPECTION_FIELDS = [
   'envWire',
   'envBuilding',
   'envNote',
-  'girthHeight',
   'caution',
 ];
 
@@ -252,7 +235,6 @@ export function emptyInspection() {
     envWire: '',
     envBuilding: '',
     envNote: '',
-    girthHeight: '',
     caution: '',
   };
 }
