@@ -11,6 +11,7 @@ import {
   INSPECTION_FIELDS,
   LEAF_DENSITY,
   SURVEY_FIELDS,
+  ALERT_LABELS,
   TREE_FORM,
   VIGOR,
   alertLevel,
@@ -228,4 +229,48 @@ test('重点観察: 空洞・亀裂・傾斜・揺らぎ・入り皮 有は 2（
 test('重点観察: 所見なし点検済みは 1、未入力は 0', () => {
   assert.equal(alertLevel({ leafDensity: '2', fungus: '無' }), 1);
   assert.equal(alertLevel({}), 0);
+});
+
+
+// --- 点検履歴 / 凡例（GAS側・v1.3）---
+
+const gasSource = () => readFileSync(new URL('../gas/Code.gs', import.meta.url), 'utf8');
+
+test('GAS: tree_history は trees と同じ列＋historyId/recordedAt', () => {
+  const gas = gasSource();
+  // SHEETS.tree_history = ['historyId', 'recordedAt'].concat(SHEETS.trees)
+  assert.match(
+    gas,
+    /SHEETS\.tree_history\s*=\s*\['historyId',\s*'recordedAt'\]\.concat\(SHEETS\.trees\)/,
+    'tree_history が trees の列から作られていること（列を足したとき履歴にも自動でつく）',
+  );
+  // 同期対象（pull/upsert）には入れない＝追記のみ
+  const dataSheets = /var DATA_SHEETS = \[([^\]]+)\]/.exec(gas)[1];
+  assert.equal(dataSheets.includes('tree_history'), false, 'tree_history は DATA_SHEETS に入れない');
+  assert.match(gas, /function appendHistory_/, '追記する関数がある');
+});
+
+test('GAS: 凡例シートの中身が inspection.js とずれていない', () => {
+  const gas = gasSource();
+  const block = gas.slice(gas.indexOf('var LEGEND = ['), gas.indexOf('// ---'));
+  // 「項目, 値, 意味」の3つ組を取り出す
+  const rows = [...block.matchAll(/\['([^']*)',\s*'([^']*)',\s*'([^']*)'\]/g)]
+    .map((m) => [m[1], m[2], m[3]]);
+  const find = (name, value) => rows.find((r) => r[0] === name && r[1] === value);
+
+  const check = (name, options) => {
+    for (const o of options) {
+      const hit = find(name, o.value);
+      assert.ok(hit, `凡例に ${name} の ${o.value} が無い`);
+      assert.equal(hit[2], o.hint, `${name} ${o.value} の意味がずれている`);
+    }
+  };
+  check('葉の茂り', LEAF_DENSITY);
+  check('活力度_樹勢', VIGOR);
+  check('活力度_樹形', TREE_FORM);
+  for (const [value, label] of Object.entries(ALERT_LABELS)) {
+    const hit = find('重点観察', value);
+    assert.ok(hit, `凡例に 重点観察 の ${value} が無い`);
+    assert.equal(hit[2], label, `重点観察 ${value} の表示名がずれている`);
+  }
 });

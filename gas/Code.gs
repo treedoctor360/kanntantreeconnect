@@ -1,5 +1,13 @@
 /**
- * かんたん樹木登録 — スプレッドシート中継 Web App  v1.1
+ * かんたん樹木登録 — スプレッドシート中継 Web App  v1.3
+ *
+ * v1.2 → v1.3 の変更点
+ *  - 点検履歴 tree_history シートを追加（追記のみ）。同じ木を2回目に点検しても
+ *    前回の値が消えないようにした。アプリ側の変更は不要
+ *  - 凡例シートを常設（段階もの 1〜4 と重点観察区分の意味）
+ *
+ * v1.1 → v1.2 の変更点
+ *  - 国交省様式に合わせた列の並べ替え（活力度・樹幹の揺らぎ/傾斜/亀裂・重点観察を追加）
  *
  * v1.0 → v1.1 の変更点
  *  - 初回リクエストが遅くてタイムアウトするのを直した（書式設定の呼び出しを列ごと→まとめて）
@@ -49,7 +57,7 @@
  * 既にシートを作ったあとで列を変えた場合は、getSheet_ が見出し行を作り直し、
  * 既存の行を新しい列の位置へ並べ替える（下の ensureHeaders_ 参照）。
  */
-var VERSION = 'v1.2';
+var VERSION = 'v1.3';
 
 var SHEETS = {
   parks: ['id', 'code', 'name', 'lat', 'lng', 'note', 'pid', 'lastUsedAt', 'createdAt', 'updatedAt'],
@@ -69,11 +77,62 @@ var SHEETS = {
   deletions: ['id', 'table', 'at'],
 };
 
+/**
+ * 点検履歴（append-only）。
+ *
+ * trees は同じ木を2回目に点検すると行が上書きされ、前回の値が消える。
+ * 経年変化（3年前は葉の茂りが「普」だった木が、いま「ま」）は樹木診断で
+ * いちばん価値のある情報なので、書き込みのたびにこのシートへ**追記だけ**する。
+ *
+ * 列は trees と同じものに historyId / recordedAt を足しただけ。
+ * こうしておくと、trees に列を足したとき履歴側も自動でついてくる。
+ *   historyId  … {treeId}_{updatedAt}。同じ内容を再送しても重複しない
+ *   recordedAt … シートに追記した時刻（updatedAt とは別。あとから並べ替えるため）
+ *
+ * **絶対に書き換えない・消さない。** アプリ側の変更は要らない（push の中身は今のまま）。
+ */
+SHEETS.tree_history = ['historyId', 'recordedAt'].concat(SHEETS.trees);
+
 /** 数値として扱う列。それ以外は文字列（日時がDateに化けないよう書式を「書式なしテキスト」にする） */
 var NUMBER_FIELDS = ['lat', 'lng', 'accuracy', 'height', 'girth', 'photoCount', 'alertLevel'];
 
-/** アプリと同期する実体のシート（deletions は削除の記録なので別扱い） */
+/**
+ * アプリと同期する実体のシート。
+ * deletions（削除の記録）と tree_history（追記のみ）はここに入れない。
+ * ＝ pull で返さないし、upsert もしない。
+ */
 var DATA_SHEETS = ['parks', 'trees'];
+
+/**
+ * 凡例シート。段階もの（1〜4）と重点観察区分は、値だけでは人が読めないため常設する。
+ *
+ * **アプリ側 src/lib/inspection.js と同じ内容にすること。**
+ * ずれていないかは test/inspection.test.js が機械で確かめている
+ * （このファイルを読んで LEAF_DENSITY / VIGOR / TREE_FORM / ALERT_LABELS と突き合わせる）。
+ */
+var LEGEND_SHEET = '凡例';
+var LEGEND = [
+  ['項目', '値', '意味'],
+  ['葉の茂り', '1', '枝先まで密'],
+  ['葉の茂り', '2', 'ふつう'],
+  ['葉の茂り', '3', 'まばら（樹冠から空が透ける）'],
+  ['葉の茂り', '4', 'ほとんどない'],
+  ['活力度_樹勢', '1', '良い'],
+  ['活力度_樹勢', '2', '少し悪い'],
+  ['活力度_樹勢', '3', '悪い'],
+  ['活力度_樹勢', '4', '枯死（ナラ枯れ・マツ枯れ等）'],
+  ['活力度_樹形', '1', '望ましい樹形を保っている'],
+  ['活力度_樹形', '2', '樹形に乱れがある'],
+  ['活力度_樹形', '3', '樹形が著しく乱れ、回復の見込みが低い'],
+  ['活力度_樹形', '4', '望ましい樹形が完全に崩壊している'],
+  ['重点観察', '3', '重点'],
+  ['重点観察', '2', '注意'],
+  ['重点観察', '1', '通常'],
+  ['重点観察', '0', '未点検'],
+  ['', '', ''],
+  ['※ 重点観察は「観察の優先度」であり、危険度・診断結果ではない', '', ''],
+  ['※ 有/無/未 は語のまま。「無（見たが無かった）」と「未（見ていない）」は別の意味', '', ''],
+];
 
 // ------------------------------------------------------------------
 // 入口
@@ -130,12 +189,13 @@ function doGet() {
     return json_(out);
   }
 
-  // 2. シートを作れるか（初回はここで parks / trees / deletions ができる）
+  // 2. シートを作れるか（初回はここで parks / trees / deletions / tree_history / 凡例 ができる）
   try {
     var counts = {};
     Object.keys(SHEETS).forEach(function (name) {
       counts[name] = Math.max(0, getSheet_(name).getLastRow() - 1);
     });
+    ensureLegend_();
     out.checks.sheets = { ok: true, counts: counts };
   } catch (err) {
     out.ok = false;
@@ -174,6 +234,7 @@ function ping_() {
 function pull_(body) {
   var since = body && body.since ? String(body.since) : '';
   var out = { ok: true, at: new Date().toISOString() };
+  ensureLegend_(); // 凡例シートを用意する（中身が同じなら何もしない）
 
   DATA_SHEETS.forEach(function (name) {
     var rows = readAll_(name);
@@ -194,9 +255,85 @@ function push_(body) {
     result[name] = records.length ? upsert_(name, records) : { added: 0, updated: 0, skipped: 0 };
   });
 
+  // 樹木は上書きされる前に履歴へ残す（追記のみ）。
+  // upsert のあとに呼ぶのは、実際にシートへ書けたものだけを履歴にしたいため。
+  var trees = (body && body.trees) || [];
+  result.history = trees.length ? appendHistory_(trees) : { added: 0, skipped: 0 };
+
   var dels = (body && body.deletions) || [];
   result.deletions = dels.length ? applyDeletions_(dels) : { recorded: 0, removed: 0 };
   return result;
+}
+
+/**
+ * 点検履歴へ追記する。**既存行は絶対に書き換えない。**
+ * historyId（{treeId}_{updatedAt}）が既にあるものは飛ばすので、
+ * 同じ内容を再送しても履歴は重複しない。
+ */
+function appendHistory_(records) {
+  var sheet = getSheet_('tree_history');
+  var headers = SHEETS.tree_history;
+  var known = rowIndex_(sheet, headers.length).map;
+  var at = new Date().toISOString();
+  var rows = [];
+  var skipped = 0;
+
+  for (var i = 0; i < records.length; i++) {
+    var rec = records[i];
+    if (!rec || !rec.id) continue;
+    var hid = String(rec.id) + '_' + String(rec.updatedAt || '');
+    if (known[hid]) {
+      skipped++;
+      continue;
+    }
+    known[hid] = -1; // 同じ回に同じものが2度来ても1行だけにする
+    rows.push(
+      headers.map(function (h) {
+        if (h === 'historyId') return hid;
+        if (h === 'recordedAt') return at;
+        return toCell_(h, rec[h]);
+      }),
+    );
+  }
+
+  if (rows.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+  }
+  return { added: rows.length, skipped: skipped };
+}
+
+/**
+ * 凡例シートを用意する。中身が変わっていなければ何もしない
+ * （毎回の同期で書き直すと無駄なので、比べてから書く）。
+ */
+function ensureLegend_() {
+  var ss = book_();
+  var sheet = ss.getSheetByName(LEGEND_SHEET);
+  var rows = LEGEND.length;
+  var cols = 3;
+  if (!sheet) {
+    sheet = ss.insertSheet(LEGEND_SHEET);
+  } else {
+    var last = sheet.getLastRow();
+    if (last === rows) {
+      var cur = sheet.getRange(1, 1, rows, cols).getValues();
+      var same = true;
+      for (var r = 0; r < rows && same; r++) {
+        for (var c = 0; c < cols; c++) {
+          if (String(cur[r][c] || '') !== String(LEGEND[r][c] || '')) {
+            same = false;
+            break;
+          }
+        }
+      }
+      if (same) return sheet; // 変わっていない
+    }
+    sheet.clear();
+  }
+  sheet.getRange(1, 1, rows, cols).setNumberFormat('@').setValues(LEGEND);
+  sheet.getRange(1, 1, 1, cols).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  return sheet;
 }
 
 // ------------------------------------------------------------------
