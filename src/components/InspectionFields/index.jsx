@@ -4,6 +4,7 @@ import {
   BARK_INCLUSION,
   CAVITY,
   CAVITY_PART,
+  CROWN_WIDTH_PRESETS,
   ENV_ITEMS,
   ENV_PRESENCE,
   FRASS,
@@ -15,6 +16,7 @@ import {
   TRUNK_CRACK,
   TRUNK_LEAN,
   TRUNK_SWAY,
+  VEG_CLASS,
   VIGOR,
   hasPart,
   togglePart,
@@ -74,6 +76,47 @@ export default function InspectionFields({ value, onChange }) {
           <span className="choice-hint">m — 上に無い高さはここへ。目分量でよい（巻尺は使わない）</span>
         </div>
       </div>
+
+      {/* 樹冠幅（PLATEAU veg:crownDiameter）。水平投影の最大直径を1つだけ。目分量でよい */}
+      <div className="choice-row">
+        <span className="choice-label">樹冠幅 (m)</span>
+        <div className="choice-opts">
+          {CROWN_WIDTH_PRESETS.map((m) => {
+            const on = String(value.crownWidth) === String(m);
+            return (
+              <button
+                type="button"
+                key={m}
+                className={`choice ${on ? 'choice-on' : ''}`}
+                aria-pressed={on}
+                onClick={() => set('crownWidth', on ? '' : m)}
+              >
+                {m}
+              </button>
+            );
+          })}
+        </div>
+        <div className="height-free">
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.5"
+            value={value.crownWidth}
+            onChange={(e) => set('crownWidth', e.target.value)}
+            placeholder="他"
+            aria-label="樹冠幅（自由入力）"
+          />
+          <span className="choice-hint">m — 枝の広がりの差し渡し。任意（入れなくてよい）</span>
+        </div>
+      </div>
+
+      <ChoiceRow
+        label="区分"
+        options={VEG_CLASS}
+        value={value.vegClass}
+        onChange={(v) => set('vegClass', v)}
+        hint="高木=おおむね3m以上 / 中木=1.5〜3m / 低木=1.5m未満。任意"
+      />
 
       <ChoiceRow
         label="葉の茂り"

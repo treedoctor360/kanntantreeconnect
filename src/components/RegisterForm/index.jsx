@@ -10,7 +10,14 @@ import {
   suggestTapeNo,
 } from '../../db/db.js';
 import { makeThumb } from '../../lib/image.js';
-import { emptyInspection, emptySurvey, pickInspection } from '../../lib/inspection.js';
+import {
+  DEFAULT_GIRTH_HEIGHT,
+  GIRTH_HEIGHT,
+  emptyInspection,
+  emptySurvey,
+  pickInspection,
+} from '../../lib/inspection.js';
+import ChoiceRow from '../InspectionFields/ChoiceRow.jsx';
 import { treeNoFromTape } from '../../lib/treeNo.js';
 import LocationPicker from '../LocationPicker/index.jsx';
 import SpeciesTiles from '../SpeciesTiles/index.jsx';
@@ -148,6 +155,21 @@ export default function RegisterForm({
     if (derived) setTreeNo(derived);
   };
 
+  /**
+   * 幹周の入力。測定高が空のままだと、あとからその幹周を比較できなくなるので、
+   * 値を入れた時点で既定の 1.2m（大津市の運用）を自動で入れる。
+   * 違う高さで測ったときだけ押し替えてもらう。
+   */
+  const handleGirthChange = (v) => {
+    setGirth(v);
+    const entered = String(v).trim() !== '';
+    if (entered && !inspection.girthHeight) {
+      setInspection((cur) => ({ ...cur, girthHeight: DEFAULT_GIRTH_HEIGHT }));
+    } else if (!entered) {
+      setInspection((cur) => ({ ...cur, girthHeight: '' }));
+    }
+  };
+
   const resetForNext = async (nextPark) => {
     setCoord(emptyCoord);
     setPhotos([]);
@@ -195,6 +217,8 @@ export default function RegisterForm({
         // 点検内容（紙のチェックシート1ページ目）
         tapeNo: inspection.tapeNo.trim(),
         height: inspection.height === '' ? null : Number(inspection.height),
+        crownWidth: inspection.crownWidth === '' ? null : Number(inspection.crownWidth),
+        vegClass: inspection.vegClass,
         leafDensity: inspection.leafDensity,
         fungus: inspection.fungus,
         fungusPart: inspection.fungusPart,
@@ -211,6 +235,7 @@ export default function RegisterForm({
         envWire: inspection.envWire,
         envBuilding: inspection.envBuilding,
         envNote: inspection.envNote.trim(),
+        girthHeight: inspection.girthHeight,
         caution: inspection.caution.trim(),
         photoCount: photos.length, // 紙の「写真」欄にあたる（写真そのものはシートに送らない）
         // 調査情報（表頭）
@@ -344,9 +369,19 @@ export default function RegisterForm({
                 inputMode="decimal"
                 step="1"
                 value={girth}
-                onChange={(e) => setGirth(e.target.value)}
+                onChange={(e) => handleGirthChange(e.target.value)}
               />
             </label>
+            {/* 測定高が分からない幹周は後から比較できない。幹周を入れたときだけ聞く */}
+            {String(girth).trim() !== '' && (
+              <ChoiceRow
+                label="幹周の測定高"
+                options={GIRTH_HEIGHT}
+                value={inspection.girthHeight}
+                onChange={(v) => setInspection({ ...inspection, girthHeight: v })}
+                hint="大津市の運用は地上高 1.2m（胸高）。違う高さで測ったときだけ押し替える"
+              />
+            )}
             <label className="field">
               <span className="field-label">メモ</span>
               <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />

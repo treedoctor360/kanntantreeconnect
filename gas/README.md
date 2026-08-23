@@ -131,6 +131,8 @@ URLだけで誰でも書き込める状態が気になる場合。
 | species | 樹種（不明可） | 樹種和名。`不明` も可 |
 | alertLevel | 重点観察 | `3`=重点 / `2`=注意 / `1`=通常 / `0`=未点検（WebGISの色分け用の派生値） |
 | height | 樹高 | m（数値）。目分量 |
+| crownWidth | 樹冠幅 | m（数値）。枝の広がりの差し渡し。任意（PLATEAU `veg:crownDiameter`） |
+| vegClass | 区分 | `高木` `中木` `低木`。任意（PLATEAU `veg:class`） |
 | leafDensity | 葉の茂り | `1`=濃 / `2`=普 / `3`=まばら / `4`=ほとんどない（凡例シート参照） |
 | fungus | 樹幹・大枝・地際のキノコ | `有` `無` `未` |
 | fungusPart | キノコ部位 | `根` `幹` `枝` `枯` `不`（複数は `根・幹` のように `・` でつなぐ） |
@@ -150,6 +152,7 @@ URLだけで誰でも書き込める状態が気になる場合。
 | surveyDate / surveyor / tapeRoll | 調査日 / 調査者 / テープロール | 表頭の項目。`2026-08-20` / 氏名 / `A` `B` `C` |
 | lat / lng / accuracy / coordSource | — | 座標・誤差(m)・入力元（gps/map/manual/link） |
 | girth | — | 幹周(cm) |
+| girthHeight | — | 幹周の測定高。`1.2`（大津市の運用＝胸高）/ `1.3` / `根元` / `その他`。**数値列にしない** |
 | note | — | メモ（注意とは別。アプリ側の任意項目） |
 | trunkDamageLegacy | — | 旧「幹の損傷」の退避列（要再確認の目印。新規入力はしない） |
 | registeredAt / updatedAt | — | 日時（ISO 8601） |

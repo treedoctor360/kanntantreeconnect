@@ -1,5 +1,8 @@
 /**
- * かんたん樹木登録 — スプレッドシート中継 Web App  v1.3
+ * かんたん樹木登録 — スプレッドシート中継 Web App  v1.4
+ *
+ * v1.3 → v1.4 の変更点
+ *  - PLATEAU移行に備えた任意項目を追加（crownWidth 樹冠幅 / vegClass 区分 / girthHeight 幹周測定高）
  *
  * v1.2 → v1.3 の変更点
  *  - 点検履歴 tree_history シートを追加（追記のみ）。同じ木を2回目に点検しても
@@ -57,13 +60,13 @@
  * 既にシートを作ったあとで列を変えた場合は、getSheet_ が見出し行を作り直し、
  * 既存の行を新しい列の位置へ並べ替える（下の ensureHeaders_ 参照）。
  */
-var VERSION = 'v1.3';
+var VERSION = 'v1.4';
 
 var SHEETS = {
   parks: ['id', 'code', 'name', 'lat', 'lng', 'note', 'pid', 'lastUsedAt', 'createdAt', 'updatedAt'],
   trees: [
     'id', 'parkId', 'parkCode',
-    'tapeNo', 'treeNo', 'species', 'alertLevel', 'height',
+    'tapeNo', 'treeNo', 'species', 'alertLevel', 'height', 'crownWidth', 'vegClass',
     'leafDensity', 'fungus', 'fungusPart',
     'cavity', 'cavityPart',
     'trunkSway', 'trunkLean', 'trunkCrack', 'barkInclusion', 'frass',
@@ -72,7 +75,7 @@ var SHEETS = {
     'caution', 'photoCount',
     'surveyDate', 'surveyor', 'tapeRoll',
     'lat', 'lng', 'accuracy', 'coordSource',
-    'girth', 'note', 'trunkDamageLegacy', 'registeredAt', 'updatedAt',
+    'girth', 'girthHeight', 'note', 'trunkDamageLegacy', 'registeredAt', 'updatedAt',
   ],
   deletions: ['id', 'table', 'at'],
 };
@@ -94,7 +97,10 @@ var SHEETS = {
 SHEETS.tree_history = ['historyId', 'recordedAt'].concat(SHEETS.trees);
 
 /** 数値として扱う列。それ以外は文字列（日時がDateに化けないよう書式を「書式なしテキスト」にする） */
-var NUMBER_FIELDS = ['lat', 'lng', 'accuracy', 'height', 'girth', 'photoCount', 'alertLevel'];
+var NUMBER_FIELDS = [
+  'lat', 'lng', 'accuracy', 'height', 'crownWidth', 'girth', 'photoCount', 'alertLevel',
+];
+// girthHeight は '1.2' のほか '根元' も入るので文字列のまま（数値列にしない）
 
 /**
  * アプリと同期する実体のシート。
