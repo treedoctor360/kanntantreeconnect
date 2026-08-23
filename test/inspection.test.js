@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 import {
   CAVITY,
   CAVITY_PART,
+  DEFAULT_GIRTH_HEIGHT,
+  GIRTH_HEIGHT,
   ENV_ITEMS,
   FUNGUS,
   FUNGUS_PART,
@@ -13,6 +15,7 @@ import {
   SURVEY_FIELDS,
   ALERT_LABELS,
   TREE_FORM,
+  VEG_CLASS,
   VIGOR,
   alertLevel,
   emptyInspection,
@@ -273,4 +276,36 @@ test('GAS: 凡例シートの中身が inspection.js とずれていない', () 
     assert.ok(hit, `凡例に 重点観察 の ${value} が無い`);
     assert.equal(hit[2], label, `重点観察 ${value} の表示名がずれている`);
   }
+});
+
+
+// --- PLATEAU移行に備えた任意項目（移行メモ4-2）---
+
+test('樹冠幅・区分・幹周測定高が点検内容に入っている', () => {
+  const empty = emptyInspection();
+  for (const k of ['crownWidth', 'vegClass', 'girthHeight']) {
+    assert.equal(k in empty, true, `${k} が emptyInspection に無い`);
+  }
+  // 樹冠幅は樹高の隣（大きさの項目をまとめる）
+  const i = (k) => INSPECTION_FIELDS.indexOf(k);
+  assert.ok(i('height') < i('crownWidth'));
+  assert.ok(i('crownWidth') < i('vegClass'));
+});
+
+test('区分は 高木/中木/低木', () => {
+  assert.deepEqual(VEG_CLASS.map((o) => o.value), ['高木', '中木', '低木']);
+});
+
+test('幹周の測定高: 既定は 1.2m（大津市の運用＝日本の胸高）', () => {
+  assert.equal(DEFAULT_GIRTH_HEIGHT, '1.2');
+  const values = GIRTH_HEIGHT.map((o) => o.value);
+  assert.equal(values.includes(DEFAULT_GIRTH_HEIGHT), true, '既定値が選択肢に含まれる');
+  assert.deepEqual(values, ['1.2', '1.3', '根元', 'その他']);
+});
+
+test('幹周の測定高は数値にしない（根元・その他が入るため）', () => {
+  const gas = gasSource();
+  const numberFields = /var NUMBER_FIELDS = \[([^\]]+)\]/s.exec(gas)[1];
+  assert.equal(numberFields.includes("'girthHeight'"), false, 'girthHeight は数値列にしない');
+  assert.equal(numberFields.includes("'crownWidth'"), true, 'crownWidth は数値列');
 });
