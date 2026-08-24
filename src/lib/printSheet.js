@@ -5,8 +5,12 @@
 // 選択肢は必ず inspection.js の配列を参照すること（ここに文字列を直書きしない）。
 // ずれていないかは test/printSheet.test.js が機械で確かめている。
 //
-// 出力は「そのまま印刷できる1つのHTML文書」の文字列。DOMには触らないので
-// node --test でそのまま中身を確かめられる。
+// 出力は2通り。どちらも同じ中身から作る。
+//   buildSurveySheetHtml()     … そのまま印刷できる1つのHTML文書（「HTMLで保存」用）
+//   buildSurveySheetFragment() … アプリの中に貼り付ける断片（設定タブのプレビュー用）
+// 別タブで開くと、ホーム画面から起動したiPhoneでは戻るボタンが無くてアプリへ帰れない。
+// そのため画面で見せるほうは「アプリの中に重ねて出して、閉じるボタンで戻る」形にしてある。
+// どちらもDOMには触らないので node --test でそのまま中身を確かめられる。
 //
 // 用紙: A4横。1行＝1本（株立ちも1本として1行）。
 
@@ -115,26 +119,35 @@ export const URGENT_RULES = [
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-const CSS = `
+/**
+ * 用紙のCSS。
+ * scope が空なら単体のHTML文書用（`body` にそのまま当てる）。
+ * scope に `.sheetdoc` を渡すとアプリの中に貼っても他の画面に影響しない形になる
+ * （h1 / table のような広い指定がアプリ側へ漏れないようにするため）。
+ */
+function css(scope = '') {
+  const root = scope || 'body';
+  const s = scope ? `${scope} ` : '';
+  return `
 @page { size: A4 landscape; margin: 8mm; }
-* { box-sizing: border-box; }
-body {
+${s}* { box-sizing: border-box; }
+${root} {
   margin: 0;
   font-family: 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', sans-serif;
   color: #000;
   font-size: 9pt;
 }
-.sheet { page-break-after: always; }
-.sheet:last-child { page-break-after: auto; }
-h1 { font-size: 13pt; margin: 0 0 3mm; text-align: center; letter-spacing: 0.1em; }
-h2 { font-size: 9.5pt; margin: 2.5mm 0 1.5mm; border-bottom: 1px solid #000; padding-bottom: 0.8mm; }
-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
-th, td { border: 0.4pt solid #000; padding: 0.6mm 0.4mm; vertical-align: middle; }
+${s}.sheet { page-break-after: always; }
+${s}.sheet:last-child { page-break-after: auto; }
+${s}h1 { font-size: 13pt; margin: 0 0 3mm; text-align: center; letter-spacing: 0.1em; }
+${s}h2 { font-size: 9.5pt; margin: 2.5mm 0 1.5mm; border-bottom: 1px solid #000; padding-bottom: 0.8mm; }
+${s}table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+${s}th, ${s}td { border: 0.4pt solid #000; padding: 0.6mm 0.4mm; vertical-align: middle; }
 /* 表頭（場所・調査日・調査者・テープロール） */
-.head td { height: 8mm; font-size: 9pt; padding: 1mm 2mm; }
-.head .label { width: 18mm; background: #f0f0f0; font-weight: 600; white-space: nowrap; }
+${s}.head td { height: 8mm; font-size: 9pt; padding: 1mm 2mm; }
+${s}.head .label { width: 18mm; background: #f0f0f0; font-weight: 600; white-space: nowrap; }
 /* 本表 */
-.grid th {
+${s}.grid th {
   background: #f0f0f0;
   font-size: 7pt;
   line-height: 1.25;
@@ -142,32 +155,33 @@ th, td { border: 0.4pt solid #000; padding: 0.6mm 0.4mm; vertical-align: middle;
   font-weight: 600;
   word-break: break-all; /* 「道路園路」のような4文字を2行に折り返して細い列に収める */
 }
-.grid th .sub { display: block; font-size: 5.5pt; font-weight: 400; word-break: normal; }
+${s}.grid th .sub { display: block; font-size: 5.5pt; font-weight: 400; word-break: normal; }
 /* 選択肢は1行に収める（折り返すと〇が付けにくい） */
-.grid td { text-align: center; font-size: 7pt; white-space: nowrap; color: #333; }
-.grid td.write { color: #000; }
-.note { font-size: 7.5pt; margin: 2mm 0 0; line-height: 1.5; }
+${s}.grid td { text-align: center; font-size: 7pt; white-space: nowrap; color: #333; }
+${s}.grid td.write { color: #000; }
+${s}.note { font-size: 7.5pt; margin: 2mm 0 0; line-height: 1.5; }
 /* 2枚目 */
-.legend { column-count: 3; column-gap: 6mm; font-size: 7.5pt; }
-.legend section { break-inside: avoid; margin-bottom: 2mm; }
-.legend h3 { font-size: 8pt; margin: 0 0 0.5mm; }
-.legend ul { margin: 0; padding-left: 4mm; line-height: 1.35; }
-.legend .memo { color: #444; line-height: 1.35; }
-.rules { font-size: 7.5pt; line-height: 1.4; margin: 0; column-count: 2; column-gap: 6mm; }
-.rules div { break-inside: avoid; margin-bottom: 1.5mm; }
-.rules b { display: block; }
-.urgent { border: 1.2pt solid #000; padding: 2mm 3mm; margin-top: 2mm; font-size: 8pt; }
-.urgent ul { margin: 1mm 0 0; padding-left: 5mm; }
-.urgent li { line-height: 1.45; }
-.foot { margin-top: 4mm; font-size: 7.5pt; color: #333; display: flex; justify-content: space-between; }
+${s}.legend { column-count: 3; column-gap: 6mm; font-size: 7.5pt; }
+${s}.legend section { break-inside: avoid; margin-bottom: 2mm; }
+${s}.legend h3 { font-size: 8pt; margin: 0 0 0.5mm; }
+${s}.legend ul { margin: 0; padding-left: 4mm; line-height: 1.35; }
+${s}.legend .memo { color: #444; line-height: 1.35; }
+${s}.rules { font-size: 7.5pt; line-height: 1.4; margin: 0; column-count: 2; column-gap: 6mm; }
+${s}.rules div { break-inside: avoid; margin-bottom: 1.5mm; }
+${s}.rules b { display: block; }
+${s}.urgent { border: 1.2pt solid #000; padding: 2mm 3mm; margin-top: 2mm; font-size: 8pt; }
+${s}.urgent ul { margin: 1mm 0 0; padding-left: 5mm; }
+${s}.urgent li { line-height: 1.45; }
+${s}.foot { margin-top: 4mm; font-size: 7.5pt; color: #333; display: flex; justify-content: space-between; }
 @media screen {
-  body { background: #f2f2f2; padding: 8mm; }
-  .sheet { background: #fff; padding: 8mm; margin: 0 auto 8mm; max-width: 297mm; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
-  .toolbar { position: sticky; top: 0; text-align: center; margin-bottom: 6mm; }
-  .toolbar button { font: inherit; font-size: 11pt; padding: 8px 20px; cursor: pointer; }
+  ${root} { background: #f2f2f2; padding: 8mm; }
+  ${s}.sheet { background: #fff; padding: 8mm; margin: 0 auto 8mm; width: 281mm; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
+  ${s}.toolbar { position: sticky; top: 0; text-align: center; margin-bottom: 6mm; }
+  ${s}.toolbar button { font: inherit; font-size: 11pt; padding: 8px 20px; cursor: pointer; }
 }
-@media print { .toolbar { display: none; } }
+@media print { ${s}.toolbar { display: none; } }
 `;
+}
 
 /** 表頭（場所・調査日・調査者・テープロール） */
 function headerHtml({ parkName, surveyDate, surveyor, tapeRoll }) {
@@ -230,31 +244,9 @@ function legendHtml() {
   </div>`;
 }
 
-/**
- * 紙の調査票（そのまま印刷できるHTML文書）を作る。
- *
- * @param {object} o
- * @param {string} o.parkName   場所（公園名）。空なら手書き
- * @param {string} o.surveyDate 調査日。空なら「　年　月　日」
- * @param {string} o.surveyor   調査者
- * @param {string} o.tapeRoll   テープロール（'A'|'B'|'C'）。指定すると下線を引く
- * @param {number} o.rows       1枚に入れる行数（＝本数）
- * @returns {string} HTML文書
- */
-export function buildSurveySheetHtml({
-  parkName = '',
-  surveyDate = '',
-  surveyor = '',
-  tapeRoll = '',
-  rows = 14,
-} = {}) {
-  return `<!doctype html>
-<html lang="ja"><head><meta charset="utf-8">
-<title>樹木点検 現地チェックシート</title>
-<style>${CSS}</style></head>
-<body>
-<div class="toolbar"><button type="button" onclick="window.print()">🖨 印刷する</button></div>
-<div class="sheet">
+/** 用紙2枚ぶんの中身（1枚目＝記入表、2枚目＝凡例）。文書にも断片にも同じものを使う */
+function sheetsHtml({ parkName, surveyDate, surveyor, tapeRoll, rows }) {
+  return `<div class="sheet">
   <h1>樹木点検　現地チェックシート</h1>
   ${headerHtml({ parkName, surveyDate, surveyor, tapeRoll })}
   ${gridHtml(rows)}
@@ -265,6 +257,49 @@ export function buildSurveySheetHtml({
   </p>
   <div class="foot"><span>© 2026 Koh Kitsukawa. All rights reserved.</span><span>1/2</span></div>
 </div>
-${legendHtml()}
+${legendHtml()}`;
+}
+
+const DEFAULTS = { parkName: '', surveyDate: '', surveyor: '', tapeRoll: '', rows: 14 };
+
+/**
+ * 紙の調査票（そのまま印刷できる1つのHTML文書）を作る。
+ * 「HTMLで保存」で書き出す中身。単体で開いても印刷ボタンが使える。
+ *
+ * @param {object} o
+ * @param {string} o.parkName   場所（公園名）。空なら手書き
+ * @param {string} o.surveyDate 調査日。空なら「　年　月　日」
+ * @param {string} o.surveyor   調査者
+ * @param {string} o.tapeRoll   テープロール（'A'|'B'|'C'）。指定すると下線を引く
+ * @param {number} o.rows       1枚に入れる行数（＝本数）
+ * @returns {string} HTML文書
+ */
+export function buildSurveySheetHtml(o = {}) {
+  const opts = { ...DEFAULTS, ...o };
+  return `<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<title>樹木点検 現地チェックシート</title>
+<style>${css()}</style></head>
+<body>
+<div class="toolbar"><button type="button" onclick="window.print()">🖨 印刷する</button></div>
+${sheetsHtml(opts)}
 </body></html>`;
+}
+
+/**
+ * 同じ用紙を、アプリの中に貼り付けられる断片として作る。
+ *
+ * 設定タブのプレビューはこちらを使う。別タブで開くと、ホーム画面から起動した
+ * iPhoneでは戻るボタンが無くてアプリに帰れなくなるため、アプリの中で開いて
+ * 閉じるボタンで戻れるようにしている。
+ *
+ * CSSは `.sheetdoc` の中だけに効くようにしてあるので、アプリの見た目は変わらない。
+ * 印刷はアプリ側（app.css の `@media print`）でアプリ本体を隠し、この断片だけを出す。
+ *
+ * @param {object} o buildSurveySheetHtml と同じ
+ * @returns {string} `<style>` と用紙2枚ぶんのHTML（`.sheetdoc` の中に入れる）
+ */
+export function buildSurveySheetFragment(o = {}) {
+  const opts = { ...DEFAULTS, ...o };
+  return `<style>${css('.sheetdoc')}</style>${sheetsHtml(opts)}`;
 }
