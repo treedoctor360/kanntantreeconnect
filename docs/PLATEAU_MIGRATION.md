@@ -62,7 +62,7 @@ id, code, name, lat, lng, note, pid, lastUsedAt, createdAt, updatedAt
 | `park_id`：システム主キー、再利用不可 | `parks.id`（UUID、`src/db/db.js` の `uid()`） | ○ そのまま使える |
 | `park_display_code`：運用表示コード、変更を許容 | `parks.code`（`P001` 形式、変更可） | ○ そのまま使える |
 | 樹木の不変ID | `trees.id`（UUID） | ○ |
-| 樹木の表示コード | `trees.treeNo`（`{公園コード}-{テープ番号}`） | ○ |
+| 樹木の表示コード | `trees.treeNo`（`{公園コード}{テープ番号}`。「-」は無い） | ○ |
 | 外部台帳との紐付けキー | `parks.pid`（CSV取込で入る既存台帳ID） | ○ `ExternalReference` に流せる |
 
 **注意点**：`updatePark()` は公園コードを変えたとき `renumber` オプションで `treeNo` を振り直す
@@ -274,7 +274,7 @@ gml:id    = trees.id（UUID）                                        ← 不変
 
 - `gml:name` は公園コード変更で変わりうる（1-2）。**変わってよい**。
 - 過去の点検ログとのリレーションは `gml:id`（UUID）だけを見る。
-- 現行の `treeNo`（`P001-A201`）はテープ番号ベースで、公園内で連続していない。
+- 現行の `treeNo`（`P001A0201`）はテープ番号ベースで、公園内で連続していない。
   移行時に `gml:name` 用の4桁連番を別途振ることになる。**現行の treeNo は捨てず、
   拡張属性 `tapeTreeNo` として残す**（紙の記録との照合に要る）。
 
