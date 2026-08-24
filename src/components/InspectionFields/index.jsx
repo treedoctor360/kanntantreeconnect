@@ -134,7 +134,7 @@ export default function InspectionFields({ value, onChange }) {
           // 「無」「未」に変えたら部位は消す（紙でも部位は書かないため）
           onChange({ ...value, fungus: v, fungusPart: v === '有' ? value.fungusPart : '' })
         }
-        hint="無=見たが無かった / 未=見ていない・見えない　※必ず区別する"
+        hint="無=見たが無かった / 未=見ていない・見えない　※必ず区別する。キノコの大小・有無は腐朽の程度の目安にはならない（小さくても・無くても内部が腐朽していることがある）ので、あれば大小に関わらず記録する"
       />
 
       {value.fungus === '有' && (
