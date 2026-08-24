@@ -145,6 +145,17 @@ test('すぐ連絡: 空洞・傷「有」＋道路・園路「有」', () => {
   assert.deepEqual(urgentNotes({ envRoad: '有' }), []);
 });
 
+test('すぐ連絡: 根元のキノコは大小に関わらず（大小を条件にしない）', () => {
+  // キノコの大小は腐朽の程度の目安にならないので、根元にあれば大小を問わず連絡させる
+  const notes = urgentNotes({ fungus: '有', fungusPart: '根' });
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /根元/);
+  // 「大きいものだけ」に絞る文言を復活させない
+  assert.doesNotMatch(notes[0], /大きい/);
+  // 幹だけ（根を含まない）なら根元の注意は出さない
+  assert.deepEqual(urgentNotes({ fungus: '有', fungusPart: '幹' }), []);
+});
+
 
 // --- 樹幹の揺らぎ/傾斜/亀裂（国交省 主要項目）/ 結合部の異常（入り皮） ---
 
