@@ -889,3 +889,76 @@ textarea {
   max-width: 90vw;
   text-align: center;
 }
+
+/* ------------------------------------------------------------------
+   紙の調査票のプレビュー（設定タブ → 紙の調査票）
+
+   別タブ（window.open）で開くと、ホーム画面から起動したiPhoneには
+   戻るボタンが無くアプリへ帰れない。そのためアプリの上に重ねて出し、
+   [✕ 閉じる] で戻す。用紙そのものの見た目は printSheet.js の CSS。
+   ------------------------------------------------------------------ */
+.sheet-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #f2f2f2;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-viewer-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top)); /* iPhoneの時計に隠れないように */
+  background: var(--card, #fff);
+  border-bottom: 1px solid var(--line, #ddd);
+}
+.sheet-viewer-bar .btn {
+  flex: 0 0 auto;
+  width: auto;
+}
+.sheet-viewer-hint {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.3;
+  text-align: center;
+  background: var(--card, #fff);
+  border-top: 1px solid var(--line, #ddd);
+}
+.sheet-viewer-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+@media screen {
+  /* 用紙は横281mm。「全体」のときは画面幅に収まるまで縮める。
+     zoom は箱の大きさごと縮むので、余白が残らず横スクロールも消える。
+     印刷には効かせない（原寸で出す）ので、この指定は @media screen の中だけに置く */
+  .sheet-viewer.is-fit .sheetdoc {
+    zoom: var(--sheet-zoom, 1);
+  }
+}
+
+@media print {
+  /* アプリ本体を隠して、用紙だけを印刷する */
+  body.sheet-open #root {
+    display: none !important;
+  }
+  body.sheet-open .sheet-viewer {
+    position: static;
+    display: block;
+    background: none;
+  }
+  body.sheet-open .sheet-viewer-bar {
+    display: none !important;
+  }
+  body.sheet-open .sheet-viewer-body {
+    overflow: visible;
+  }
+}

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { getSetting } from '../../db/db.js';
 import { TAPE_ROLLS, toDateInput } from '../../lib/inspection.js';
 import { buildSurveySheetHtml } from '../../lib/printSheet.js';
+import SheetViewer from './SheetViewer.jsx';
 
 const ROW_CHOICES = [10, 14, 18];
 
@@ -14,7 +15,7 @@ export default function PrintSheetPanel({ parks = [], onToast }) {
   const [surveyor, setSurveyor] = useState('');
   const [tapeRoll, setTapeRoll] = useState('');
   const [rows, setRows] = useState(14);
-  const [blocked, setBlocked] = useState(false);
+  const [open, setOpen] = useState(false); // アプリの中で用紙を開いているか
 
   // 前回の調査情報を初期値にする（登録タブと同じものを使い回す）
   useEffect(() => {
@@ -26,29 +27,17 @@ export default function PrintSheetPanel({ parks = [], onToast }) {
     });
   }, []);
 
-  const html = () =>
-    buildSurveySheetHtml({
-      parkName: parks.find((p) => p.id === parkId)?.name ?? '',
-      surveyDate,
-      surveyor,
-      tapeRoll,
-      rows,
-    });
+  const options = () => ({
+    parkName: parks.find((p) => p.id === parkId)?.name ?? '',
+    surveyDate,
+    surveyor,
+    tapeRoll,
+    rows,
+  });
 
-  const openSheet = () => {
-    setBlocked(false);
-    const w = window.open('', '_blank');
-    if (!w) {
-      setBlocked(true); // ポップアップが止められた
-      return;
-    }
-    w.document.write(html());
-    w.document.close();
-  };
-
-  // ポップアップが使えない端末向け。ファイルとして保存してから開いてもらう
+  // パソコンへ持って行きたいとき用。単体で開けるHTMLファイルにする
   const downloadSheet = () => {
-    const blob = new Blob([html()], { type: 'text/html;charset=utf-8' });
+    const blob = new Blob([buildSurveySheetHtml(options())], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -136,7 +125,7 @@ export default function PrintSheetPanel({ parks = [], onToast }) {
       </div>
 
       <div className="btn-row">
-        <button type="button" className="btn btn-primary btn-wrap" onClick={openSheet}>
+        <button type="button" className="btn btn-primary btn-wrap" onClick={() => setOpen(true)}>
           🖨 調査票を開く（印刷）
         </button>
         <button type="button" className="btn btn-ghost btn-wrap" onClick={downloadSheet}>
@@ -144,16 +133,13 @@ export default function PrintSheetPanel({ parks = [], onToast }) {
         </button>
       </div>
 
-      {blocked && (
-        <p className="status status-error">
-          別タブが開けませんでした（ポップアップが止められています）。
-          「HTMLで保存」から保存して、そのファイルを開いて印刷してください。
-        </p>
-      )}
-
       <p className="hint">
-        印刷は開いた画面の「🖨 印刷する」から。用紙は<b>A4・横</b>、余白は既定のままで収まります。
+        用紙は<b>この画面の中で</b>開きます（別のタブに移らないので、「✕ 閉じる」でいつでも
+        アプリに戻れます）。印刷は開いた画面の「🖨 印刷する」から。用紙は<b>A4・横</b>、
+        余白は既定のままで収まります。パソコンで印刷したいときは「HTMLで保存」。
       </p>
+
+      {open && <SheetViewer options={options()} onClose={() => setOpen(false)} />}
     </section>
   );
 }

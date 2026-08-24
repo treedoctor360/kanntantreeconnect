@@ -16,6 +16,7 @@ import {
   SHEET_COLUMNS,
   LEGEND_SECTIONS,
   buildSurveySheetHtml,
+  buildSurveySheetFragment,
   rowHeightMm,
 } from '../src/lib/printSheet.js';
 
@@ -98,4 +99,37 @@ test('HTMLを壊す文字が混ざっても崩れない', () => {
   assert.ok(!html.includes('<script>x</script>'));
   assert.ok(html.includes('&lt;script&gt;'));
   assert.ok(html.includes('A &amp; B'));
+});
+
+test('アプリの中に貼る断片は、文書ではなく用紙だけを返す', () => {
+  const frag = buildSurveySheetFragment({ rows: 12 });
+  // 断片なので文書の外枠は付けない（アプリのHTMLの中に入れるため）
+  assert.ok(!frag.includes('<!doctype'), '断片に doctype が混ざっている');
+  assert.ok(!frag.includes('<body'), '断片に body が混ざっている');
+  // 用紙は文書版と同じ2枚
+  assert.equal((frag.match(/class="sheet"/g) ?? []).length, 2);
+  assert.equal((frag.match(/<tr style="height:/g) ?? []).length, 12);
+  assert.ok(frag.includes('@page { size: A4 landscape'), '印刷の用紙指定が無い');
+});
+
+test('断片のCSSは .sheetdoc の中だけに効く（アプリの見た目を壊さない）', () => {
+  const frag = buildSurveySheetFragment();
+  const css = frag.slice(frag.indexOf('<style>') + 7, frag.indexOf('</style>'));
+  for (const line of css.split('\n')) {
+    const sel = line.split('{')[0].trim();
+    // 宣言の行・@ルール・閉じ括弧・空行は見ない。セレクタの行だけ確かめる
+    if (!line.includes('{') || sel.startsWith('@') || sel === '') continue;
+    for (const one of sel.split(',')) {
+      assert.ok(
+        one.trim().startsWith('.sheetdoc'),
+        `アプリ側へ漏れるセレクタがある: ${one.trim()}`,
+      );
+    }
+  }
+});
+
+test('文書版は単体で開いて印刷できる（保存して配るため）', () => {
+  const html = buildSurveySheetHtml();
+  assert.ok(html.includes('<!doctype html>'));
+  assert.ok(html.includes('window.print()'), '印刷ボタンが無い');
 });
