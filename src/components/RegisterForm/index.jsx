@@ -312,7 +312,7 @@ export default function RegisterForm({
                 setTreeNo(e.target.value);
                 setTreeNoEdited(true);
               }}
-              placeholder="P001-001"
+              placeholder="P0010001"
             />
           </label>
         </div>

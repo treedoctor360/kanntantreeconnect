@@ -21,9 +21,9 @@ export function nextParkCode(existingCodes = []) {
   return 'P' + String(max + 1).padStart(3, '0');
 }
 
-/** 公園コードと連番から樹木番号をつくる（例: 'P001', 4 → 'P001-004'） */
+/** 公園コードと連番から樹木番号をつくる（例: 'P001', 4 → 'P001004'。区切りの「-」は入れない） */
 export function formatTreeNo(parkCode, seq) {
-  return `${parkCode}-${String(seq).padStart(3, '0')}`;
+  return `${parkCode}${String(seq).padStart(3, '0')}`;
 }
 
 /**
@@ -41,6 +41,10 @@ export function parseTapeNo(tapeNo) {
  * 紙の運用ルール2:「ロールは使い切るまで**場所をまたいで連続して**使う。
  * 場所ごとに区切らない」。したがって公園では絞らず、端末にあるテープ番号
  * ぜんぶの最大値 +1 を返す（樹木番号の採番とはここが違う）。
+ *
+ * 連番は4桁にそろえる（例: ロールが無ければ最初は '0001'、ロールAなら 'A0001'）。
+ * ラベルに巻いたときに桁がそろって読みやすいための表示上の桁合わせで、
+ * 数字としての大小比較には影響しない（`parseTapeNo` は先頭の0を無視して読む）。
  *
  * @param {string[]} existingTapeNos 端末にある全テープ番号
  * @param {string} roll 選んでいるテープロール（'A'|'B'|'C'）。空でもよい
@@ -67,30 +71,30 @@ export function nextTapeNo(existingTapeNos = [], roll = '') {
   }
 
   const max = pool.reduce((m, p) => Math.max(m, p.seq), 0);
-  return `${prefix}${max + 1}`;
+  return `${prefix}${String(max + 1).padStart(4, '0')}`;
 }
 
 /**
  * テープ番号から樹木番号を作る。
- * 紙のチェックシートの「樹木番号（公園コード+テープ番号）」に合わせる。
- * 数字だけのテープ番号は3桁に揃え、それ以外（'12b' など）はそのまま後ろに付ける。
+ * 紙のチェックシートの「樹木番号（公園コード＋テープ番号）」に合わせる。
+ * 区切りの「-」は入れない（公園コードとテープ番号をそのままつなげる）。
+ * 数字だけのテープ番号は3桁に揃え、それ以外（'A0201' '12b' など）はそのまま後ろに付ける。
  */
 export function treeNoFromTape(parkCode, tapeNo) {
   const tape = String(tapeNo ?? '').trim();
   if (!parkCode || !tape) return '';
-  return /^\d+$/.test(tape) ? formatTreeNo(parkCode, parseInt(tape, 10)) : `${parkCode}-${tape}`;
+  return /^\d+$/.test(tape) ? formatTreeNo(parkCode, parseInt(tape, 10)) : `${parkCode}${tape}`;
 }
 
 /**
  * 樹木番号から連番部分を取り出す。
- * 公園コードが一致しない／連番が数字でない場合は null。
- * （手で書き換えた 'P001-004b' のような番号は採番の計算に混ぜない）
+ * 公園コードで始まらない／続きが数字でない場合は null。
+ * （手で書き換えた 'P001004b' のような番号は採番の計算に混ぜない）
  */
 export function parseTreeSeq(treeNo, parkCode) {
   if (typeof treeNo !== 'string' || !parkCode) return null;
-  const prefix = `${parkCode}-`;
-  if (!treeNo.startsWith(prefix)) return null;
-  const rest = treeNo.slice(prefix.length);
+  if (!treeNo.startsWith(parkCode)) return null;
+  const rest = treeNo.slice(parkCode.length);
   if (!/^\d+$/.test(rest)) return null;
   return parseInt(rest, 10);
 }
@@ -123,8 +127,7 @@ export function isDuplicateTreeNo(treeNo, existingTreeNos = []) {
  * 旧コードで始まる番号だけ差し替え、手書きの番号はそのまま残す。
  */
 export function renameTreeNoPrefix(treeNo, oldCode, newCode) {
-  if (typeof treeNo !== 'string') return treeNo;
-  const prefix = `${oldCode}-`;
-  if (!treeNo.startsWith(prefix)) return treeNo;
-  return `${newCode}-${treeNo.slice(prefix.length)}`;
+  if (typeof treeNo !== 'string' || !oldCode) return treeNo;
+  if (!treeNo.startsWith(oldCode)) return treeNo;
+  return `${newCode}${treeNo.slice(oldCode.length)}`;
 }
