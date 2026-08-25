@@ -20,6 +20,10 @@
       （緯度・経度は入力できないが、読み込んだ値はそのまま保持して書き出す）
 
   項目の定義・採番の規則・紙の調査票は本体（src/lib/inspection.js ほか）と同じ内容。
+
+  【保存するときの注意】このファイルの文字コードは UTF-8 です。
+  メモ帳などで開いて「ANSI」で保存し直すと、日本語が壊れて動かなくなります。
+  中身を直すときは UTF-8 のまま保存してください（コピーするだけなら問題ありません）。
   © 2026 Koh Kitsukawa. All rights reserved.
 -->
 <style>
@@ -512,6 +516,40 @@ textarea { resize: vertical; }
 <body>
 <div id="root"></div>
 <script>
+/* ------------------------------------------------------------------
+   起動できなかったときに、画面を真っ白にせず理由を出すための小さな仕掛け。
+   本体より先に置く（本体が読み込めなくても、これだけは動く）。
+
+   文字コードが UTF-8 から変わって保存されると、このファイルの日本語は
+   すべて壊れて読めなくなる。そのときでもメッセージが読めるよう、
+   ここの文言だけは \u エスケープ（半角文字だけ）で書いてある。
+   ------------------------------------------------------------------ */
+(function () {
+  var shown = false;
+  function show(detail, kind) {
+    if (shown) return;
+    shown = true;
+    var head = kind === 'encoding' ? '\u3053\u306e\u30d5\u30a1\u30a4\u30eb\u306e\u6587\u5b57\u30b3\u30fc\u30c9\u304c UTF-8 \u304b\u3089\u5909\u308f\u3063\u3066\u3044\u307e\u3059\u3002' : '\u3053\u306e\u30d5\u30a1\u30a4\u30eb\u3092\u6b63\u3057\u304f\u8aad\u307f\u8fbc\u3081\u307e\u305b\u3093\u3067\u3057\u305f\u3002\u4e2d\u8eab\u304c\u58ca\u308c\u3066\u3044\u308b\u304b\u3001\u6587\u5b57\u30b3\u30fc\u30c9\u304c UTF-8 \u304b\u3089\u5909\u308f\u3063\u3066\u3044\u307e\u3059\u3002';
+    var box = document.createElement('div');
+    box.setAttribute('style',
+      'position:fixed;inset:0;z-index:9999;background:#fff;color:#1d211e;padding:24px;overflow:auto;' +
+      'font-family:sans-serif;font-size:15px;line-height:1.8');
+    box.innerHTML =
+      '<h2 style="color:#b3261e;margin:0 0 12px;font-size:18px">\u958b\u3051\u307e\u305b\u3093\u3067\u3057\u305f</h2>' +
+      '<p style="margin:0 0 10px">' + head + '</p>' +
+      '<p style="margin:0 0 10px">\u30e1\u30e2\u5e33\u306a\u3069\u3067\u958b\u3044\u3066\u4fdd\u5b58\u3057\u76f4\u3059\u3068\u3001\u6587\u5b57\u30b3\u30fc\u30c9\u304c\u5909\u308f\u3063\u3066\u52d5\u304b\u306a\u304f\u306a\u308b\u3053\u3068\u304c\u3042\u308a\u307e\u3059\u3002</p>' +
+      '<p style="margin:0 0 16px"><b>\u914d\u5e03\u3055\u308c\u305f\u5143\u306e\u30d5\u30a1\u30a4\u30eb\u3092\u3082\u3046\u4e00\u5ea6\u30b3\u30d4\u30fc\u3057\u3066\u3001\u958b\u304d\u76f4\u3057\u3066\u304f\u3060\u3055\u3044\u3002</b></p>' +
+      (detail ? '<p style="margin:0;color:#6b7269;font-size:13px;word-break:break-all">\u30a8\u30e9\u30fc: ' +
+        String(detail).replace(/[&<>]/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+        }) + '</p>' : '');
+    (document.body || document.documentElement).appendChild(box);
+  }
+  window.addEventListener('error', function (e) { show((e && e.message) || e, 'error'); });
+  window.__bootFail = show; // 本体（文字コードの自己診断）からも呼ぶ
+})();
+</script>
+<script>
 'use strict';
 /* ==================================================================
    かんたん樹木登録（単一ファイル版）
@@ -984,7 +1022,9 @@ function decodeCsvBuffer(buf) {
   if (text.indexOf('�') >= 0) {
     try { text = new TextDecoder('shift_jis').decode(buf); } catch (e) { /* 対応していない環境ではUTF-8のまま */ }
   }
-  return text.replace(/^﻿/, '');
+  // BOM（U+FEFF）は目に見えない文字なので、ソースには直接書かず \uFEFF と書く。
+  // 直接書くと、文字コードを変えて保存されたときに「?」へ化けて壊れる。
+  return text.replace(/^\uFEFF/, '');
 }
 
 function findCol(header, candidates) {
@@ -1187,7 +1227,7 @@ function buildCsv(trees, parkNameById) {
       return csvCell(c[1](t, parkNameById[t.parkId] || ''));
     }).join(',');
   });
-  return '﻿' + [header].concat(rows).join('\r\n') + '\r\n';
+  return '\uFEFF' + [header].concat(rows).join('\r\n') + '\r\n'; // 先頭のBOMはExcel対策
 }
 
 /**
@@ -1205,7 +1245,7 @@ function buildLegendCsv() {
   Object.keys(ALERT_LABELS).forEach(function (value) {
     rows.push(['重点観察', value, ALERT_LABELS[value]]);
   });
-  return '﻿' + rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+  return '\uFEFF' + rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
 }
 
 /** ファイルとして保存させる */
@@ -3541,6 +3581,12 @@ function handleImportJson(e) {
    ================================================================== */
 
 function boot() {
+  // 文字コードの自己診断。UTF-8 以外で保存し直されると日本語がすべて壊れるので、
+  // 既知の文字（「樹」= U+6A39）が読めるかを確かめ、壊れていたら知らせて止める。
+  if ('樹'.charCodeAt(0) !== 0x6a39) {
+    if (window.__bootFail) window.__bootFail('', 'encoding');
+    return;
+  }
   rootEl.appendChild(el('div', { class: 'app' }, [
     el('header', { class: 'appbar' }),
     el('main', { class: 'main' }, [el('p', { class: 'muted pad', text: '読み込み中…' })]),
