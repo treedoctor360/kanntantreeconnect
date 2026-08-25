@@ -1168,49 +1168,105 @@ function buildLightBackup(all) {
   };
 }
 
-// 並びは国交省様式・紙のチェックシートに合わせてある（本体のCSVと同じ並び）。
-// 段階もの（葉の茂り・活力度）は値が 1〜4 なので、別途「凡例」を buildLegendCsv で出す。
-var CSV_COLUMNS = [
-  ['id', function (t) { return t.id; }],
-  ['公園コード', function (t) { return t.parkCode || ''; }],
-  ['公園名', function (t, parkName) { return parkName; }],
-  ['テープ番号', function (t) { return t.tapeNo || ''; }],
-  ['樹木番号', function (t) { return t.treeNo || ''; }],
-  ['樹種', function (t) { return t.species || ''; }],
-  ['重点観察', function (t) { return t.alertLevel == null ? '' : t.alertLevel; }],
-  ['樹高m', function (t) { return t.height == null ? '' : t.height; }],
-  ['樹冠幅m', function (t) { return t.crownWidth == null ? '' : t.crownWidth; }],
-  ['区分', function (t) { return t.vegClass || ''; }],
-  ['葉の茂り', function (t) { return t.leafDensity || ''; }],
-  ['キノコ', function (t) { return t.fungus || ''; }],
-  ['キノコ部位', function (t) { return t.fungusPart || ''; }],
-  ['空洞・傷', function (t) { return t.cavity || ''; }],
-  ['空洞・傷の位置', function (t) { return t.cavityPart || ''; }],
-  ['樹幹の揺らぎ', function (t) { return t.trunkSway || ''; }],
-  ['樹幹の不自然な傾斜', function (t) { return t.trunkLean || ''; }],
-  ['樹幹の亀裂', function (t) { return t.trunkCrack || ''; }],
-  ['結合部の異常', function (t) { return t.barkInclusion || ''; }],
-  ['フラス', function (t) { return t.frass || ''; }],
-  ['活力度_樹勢', function (t) { return t.vigor || ''; }],
-  ['活力度_樹形', function (t) { return t.treeForm || ''; }],
-  ['道路園路', function (t) { return t.envRoad || ''; }],
-  ['電線', function (t) { return t.envWire || ''; }],
-  ['建物', function (t) { return t.envBuilding || ''; }],
-  ['周辺環境備考', function (t) { return t.envNote || ''; }],
-  ['注意', function (t) { return t.caution || ''; }],
-  ['写真枚数', function (t) { return t.photoCount == null ? '' : t.photoCount; }],
-  ['調査日', function (t) { return t.surveyDate || ''; }],
-  ['調査者', function (t) { return t.surveyor || ''; }],
-  ['テープロール', function (t) { return t.tapeRoll || ''; }],
-  ['緯度', function (t) { return t.lat == null ? '' : String(t.lat); }],
-  ['経度', function (t) { return t.lng == null ? '' : String(t.lng); }],
-  ['誤差m', function (t) { return t.accuracy == null ? '' : Math.round(t.accuracy); }],
-  ['座標入力元', function (t) { return t.coordSource || ''; }],
-  ['幹周cm', function (t) { return t.girth == null ? '' : t.girth; }],
-  ['メモ', function (t) { return t.note || ''; }],
-  ['幹の損傷_旧', function (t) { return t.trunkDamageLegacy || ''; }],
-  ['登録日時', function (t) { return t.registeredAt || ''; }],
-  ['更新日時', function (t) { return t.updatedAt || ''; }],
+/**
+ * 樹木1行ぶんの列。CSV・Excel の両方がここだけを見る。
+ *
+ *   f    … 英字の項目名。**スプレッドシート（gas/Code.gs の SHEETS.trees）と同じ名前・同じ並び**。
+ *          CSVの見出しに使う（そのままシートへ貼り付けられるようにするため）
+ *   j    … 日本語の項目名。Excel（.xlsx）の見出しに使う
+ *   get  … 値の取り出し方
+ *   num  … 数値として扱う列（Excelで数値セルにする。GAS の NUMBER_FIELDS と同じ）
+ *   w    … Excelの列幅（省略時は見出しの長さから決める）
+ *   sheet: false … スプレッドシートには無い列（公園名）。**CSVには出さず、Excelにだけ出す**
+ *
+ * 列を足すときは gas/Code.gs の SHEETS.trees と並びをそろえること。
+ */
+var TREE_COLUMNS = [
+  { f: 'id', j: 'ID', w: 38, get: function (t) { return t.id; } },
+  { f: 'parkId', j: '公園ID', w: 38, get: function (t) { return t.parkId || ''; } },
+  { f: 'parkCode', j: '公園コード', get: function (t) { return t.parkCode || ''; } },
+  // 公園名はスプレッドシートの trees には無い（parks シートにある）。
+  // 紙に転記する人には必要なので、Excelにだけ出す。
+  { f: 'parkName', j: '公園名', w: 18, sheet: false, get: function (t, parkName) { return parkName; } },
+  { f: 'tapeNo', j: 'テープ番号', get: function (t) { return t.tapeNo || ''; } },
+  { f: 'treeNo', j: '樹木番号', w: 14, get: function (t) { return t.treeNo || ''; } },
+  { f: 'species', j: '樹種', w: 14, get: function (t) { return t.species || ''; } },
+  { f: 'alertLevel', j: '重点観察', num: true, get: function (t) { return t.alertLevel == null ? '' : t.alertLevel; } },
+  { f: 'height', j: '樹高m', num: true, get: function (t) { return t.height == null ? '' : t.height; } },
+  { f: 'crownWidth', j: '樹冠幅m', num: true, get: function (t) { return t.crownWidth == null ? '' : t.crownWidth; } },
+  { f: 'vegClass', j: '区分', get: function (t) { return t.vegClass || ''; } },
+  { f: 'leafDensity', j: '葉の茂り', get: function (t) { return t.leafDensity || ''; } },
+  { f: 'fungus', j: 'キノコ', get: function (t) { return t.fungus || ''; } },
+  { f: 'fungusPart', j: 'キノコ部位', get: function (t) { return t.fungusPart || ''; } },
+  { f: 'cavity', j: '空洞・傷', get: function (t) { return t.cavity || ''; } },
+  { f: 'cavityPart', j: '空洞・傷の位置', get: function (t) { return t.cavityPart || ''; } },
+  { f: 'trunkSway', j: '樹幹の揺らぎ', get: function (t) { return t.trunkSway || ''; } },
+  { f: 'trunkLean', j: '樹幹の不自然な傾斜', get: function (t) { return t.trunkLean || ''; } },
+  { f: 'trunkCrack', j: '樹幹の亀裂', get: function (t) { return t.trunkCrack || ''; } },
+  { f: 'barkInclusion', j: '結合部の異常', get: function (t) { return t.barkInclusion || ''; } },
+  { f: 'frass', j: 'フラス', get: function (t) { return t.frass || ''; } },
+  { f: 'vigor', j: '活力度_樹勢', get: function (t) { return t.vigor || ''; } },
+  { f: 'treeForm', j: '活力度_樹形', get: function (t) { return t.treeForm || ''; } },
+  { f: 'envRoad', j: '道路園路', get: function (t) { return t.envRoad || ''; } },
+  { f: 'envWire', j: '電線', get: function (t) { return t.envWire || ''; } },
+  { f: 'envBuilding', j: '建物', get: function (t) { return t.envBuilding || ''; } },
+  { f: 'envNote', j: '周辺環境備考', w: 20, get: function (t) { return t.envNote || ''; } },
+  { f: 'caution', j: '注意', w: 20, get: function (t) { return t.caution || ''; } },
+  { f: 'photoCount', j: '写真枚数', num: true, get: function (t) { return t.photoCount == null ? '' : t.photoCount; } },
+  { f: 'surveyDate', j: '調査日', w: 12, get: function (t) { return t.surveyDate || ''; } },
+  { f: 'surveyor', j: '調査者', get: function (t) { return t.surveyor || ''; } },
+  { f: 'tapeRoll', j: 'テープロール', get: function (t) { return t.tapeRoll || ''; } },
+  { f: 'lat', j: '緯度', num: true, w: 13, get: function (t) { return t.lat == null ? '' : t.lat; } },
+  { f: 'lng', j: '経度', num: true, w: 13, get: function (t) { return t.lng == null ? '' : t.lng; } },
+  { f: 'accuracy', j: '誤差m', num: true, get: function (t) { return t.accuracy == null ? '' : Math.round(t.accuracy); } },
+  { f: 'coordSource', j: '座標入力元', get: function (t) { return t.coordSource || ''; } },
+  { f: 'girth', j: '幹周cm', num: true, get: function (t) { return t.girth == null ? '' : t.girth; } },
+  { f: 'note', j: 'メモ', w: 24, get: function (t) { return t.note || ''; } },
+  { f: 'trunkDamageLegacy', j: '幹の損傷_旧', get: function (t) { return t.trunkDamageLegacy || ''; } },
+  { f: 'registeredAt', j: '登録日時', w: 20, get: function (t) { return t.registeredAt || ''; } },
+  { f: 'updatedAt', j: '更新日時', w: 20, get: function (t) { return t.updatedAt || ''; } },
+];
+
+/** CSVに出す列（スプレッドシートにある列だけ・同じ並び） */
+var CSV_COLUMNS = TREE_COLUMNS.filter(function (c) { return c.sheet !== false; });
+
+/** 公園の列（スプレッドシートの parks シートと同じ名前・同じ並び） */
+var PARK_COLUMNS = [
+  { f: 'id', j: 'ID', w: 38, get: function (p) { return p.id; } },
+  { f: 'code', j: '公園コード', get: function (p) { return p.code || ''; } },
+  { f: 'name', j: '公園名', w: 22, get: function (p) { return p.name || ''; } },
+  { f: 'lat', j: '緯度', num: true, w: 13, get: function (p) { return p.lat == null ? '' : p.lat; } },
+  { f: 'lng', j: '経度', num: true, w: 13, get: function (p) { return p.lng == null ? '' : p.lng; } },
+  { f: 'note', j: 'メモ', w: 24, get: function (p) { return p.note || ''; } },
+  { f: 'pid', j: '台帳ID', get: function (p) { return p.pid || ''; } },
+  { f: 'lastUsedAt', j: '最終使用日時', w: 20, get: function (p) { return p.lastUsedAt || ''; } },
+  { f: 'createdAt', j: '作成日時', w: 20, get: function (p) { return p.createdAt || ''; } },
+  { f: 'updatedAt', j: '更新日時', w: 20, get: function (p) { return p.updatedAt || ''; } },
+];
+
+/**
+ * 凡例の中身（段階もの 1〜4 と重点観察区分）。CSVとExcelの両方で使う。
+ * 並び・文言はスプレッドシートの「凡例」シート（gas/Code.gs の LEGEND）と同じ。
+ * @returns {Array} [英字の項目名, 日本語の項目名, 値, 意味] の配列
+ */
+function legendRows() {
+  var rows = [];
+  var push = function (field, label, options) {
+    options.forEach(function (o) { rows.push([field, label, o.value, o.hint || o.label]); });
+  };
+  push('leafDensity', '葉の茂り', LEAF_DENSITY);
+  push('vigor', '活力度_樹勢', VIGOR);
+  push('treeForm', '活力度_樹形', TREE_FORM);
+  Object.keys(ALERT_LABELS).sort().reverse().forEach(function (value) {
+    rows.push(['alertLevel', '重点観察', value, ALERT_LABELS[value]]);
+  });
+  return rows;
+}
+
+/** 凡例に添える注意書き（スプレッドシートの凡例シートと同じ文） */
+var LEGEND_NOTES = [
+  '※ 重点観察は「観察の優先度」であり、危険度・診断結果ではない',
+  '※ 有/無/未 は語のまま。「無（見たが無かった）」と「未（見ていない）」は別の意味',
 ];
 
 function csvCell(value) {
@@ -1218,13 +1274,17 @@ function csvCell(value) {
   return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-/** CSV文字列を作る（Excel対策で先頭にBOMを付ける） */
+/**
+ * CSV文字列を作る（Excel対策で先頭にBOMを付ける）。
+ * 見出しはスプレッドシートに合わせた英字（id / parkCode / tapeNo …）。
+ * 日本語で読みたいときは Excel（.xlsx）の書き出しを使う。
+ */
 function buildCsv(trees, parkNameById) {
   parkNameById = parkNameById || {};
-  var header = CSV_COLUMNS.map(function (c) { return c[0]; }).join(',');
+  var header = CSV_COLUMNS.map(function (c) { return c.f; }).join(',');
   var rows = trees.map(function (t) {
     return CSV_COLUMNS.map(function (c) {
-      return csvCell(c[1](t, parkNameById[t.parkId] || ''));
+      return csvCell(c.get(t, parkNameById[t.parkId] || ''));
     }).join(',');
   });
   return '\uFEFF' + [header].concat(rows).join('\r\n') + '\r\n'; // 先頭のBOMはExcel対策
@@ -1233,19 +1293,251 @@ function buildCsv(trees, parkNameById) {
 /**
  * 凡例CSV。段階もの（1〜4）や重点観察区分の意味を別ファイルで添える。
  * 本体CSVに凡例行を混ぜると機械取込が壊れるため、凡例は別に出す。
+ * 見出しは本体CSVと同じく英字。field は本体CSVの列名と同じなので突き合わせられる。
  */
 function buildLegendCsv() {
-  var rows = [['項目', '値', '意味']];
-  var push = function (name, options) {
-    options.forEach(function (o) { rows.push([name, o.value, o.hint || o.label]); });
-  };
-  push('葉の茂り', LEAF_DENSITY);
-  push('活力度_樹勢', VIGOR);
-  push('活力度_樹形', TREE_FORM);
-  Object.keys(ALERT_LABELS).forEach(function (value) {
-    rows.push(['重点観察', value, ALERT_LABELS[value]]);
-  });
+  var rows = [['field', 'fieldLabel', 'value', 'meaning']].concat(legendRows());
+  LEGEND_NOTES.forEach(function (note) { rows.push([note, '', '', '']); });
   return '\uFEFF' + rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+}
+
+/* ==================================================================
+   §5-2 Excel（.xlsx）の書き出し
+
+   xlsx は「XMLの束をZIPで固めたもの」なので、外部ライブラリを使わずに
+   自前で組み立てられる。ZIPは**無圧縮（stored）**で詰めるだけにしてある
+   （圧縮しなくてもZIPとして正しく、Excel・LibreOffice・スプレッドシートで開ける）。
+
+   見出しは日本語（TREE_COLUMNS の j）。シートは3枚。
+     樹木 … 1行＝1本。1行目を固定＋フィルタ付き
+     公園 … 公園マスタ
+     凡例 … 1〜4 の段階と重点観察区分の意味
+   ================================================================== */
+
+var XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+var utf8Encoder = new TextEncoder();
+function utf8(str) { return utf8Encoder.encode(str); }
+
+/** CRC32（ZIPの検査値）。表を1回だけ作って使い回す */
+var crcTable = null;
+function crc32(bytes) {
+  if (!crcTable) {
+    crcTable = new Int32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      crcTable[n] = c;
+    }
+  }
+  var crc = -1;
+  for (var i = 0; i < bytes.length; i++) crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xff];
+  return (crc ^ -1) >>> 0;
+}
+
+/**
+ * ZIP（無圧縮）にまとめて Blob を返す。
+ * files: [{ name:'xl/workbook.xml', data:Uint8Array }]
+ */
+function zipStore(files, mime) {
+  var parts = [];      // Blob に渡す実データ
+  var central = [];    // 中央ディレクトリ（末尾に付ける目録）
+  var offset = 0;
+
+  var num = function (values) { // [長さ, 値] の並びをリトルエンディアンの並びにする
+    var size = values.reduce(function (n, v) { return n + v[0]; }, 0);
+    var out = new Uint8Array(size);
+    var at = 0;
+    values.forEach(function (v) {
+      for (var i = 0; i < v[0]; i++) out[at + i] = (v[1] >>> (8 * i)) & 0xff;
+      at += v[0];
+    });
+    return out;
+  };
+
+  files.forEach(function (file) {
+    var name = utf8(file.name);
+    var data = file.data;
+    var crc = crc32(data);
+    // ローカルファイルヘッダ（署名 PK\x03\x04 / 展開に必要なバージョン20 / 無圧縮 / 日時は固定）
+    var head = num([[4, 0x04034b50], [2, 20], [2, 0x0800], [2, 0], [2, 0], [2, 0x21],
+      [4, crc], [4, data.length], [4, data.length], [2, name.length], [2, 0]]);
+    parts.push(head, name, data);
+    central.push({ name: name, crc: crc, size: data.length, offset: offset });
+    offset += head.length + name.length + data.length;
+  });
+
+  var dirParts = [];
+  var dirSize = 0;
+  central.forEach(function (e) {
+    var head = num([[4, 0x02014b50], [2, 20], [2, 20], [2, 0x0800], [2, 0], [2, 0], [2, 0x21],
+      [4, e.crc], [4, e.size], [4, e.size], [2, e.name.length], [2, 0], [2, 0], [2, 0], [2, 0],
+      [4, 0], [4, e.offset]]);
+    dirParts.push(head, e.name);
+    dirSize += head.length + e.name.length;
+  });
+  // 末尾レコード（EOCD）
+  var end = num([[4, 0x06054b50], [2, 0], [2, 0], [2, central.length], [2, central.length],
+    [4, dirSize], [4, offset], [2, 0]]);
+
+  return new Blob(parts.concat(dirParts, [end]), { type: mime || XLSX_MIME });
+}
+
+/** XMLに入れてよい形にする（制御文字は落とす） */
+function xmlEscape(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+    .replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; });
+}
+
+/** 0 → 'A', 26 → 'AA' のような列名 */
+function colName(index) {
+  var name = '';
+  var n = index;
+  do {
+    name = String.fromCharCode(65 + (n % 26)) + name;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return name;
+}
+
+/**
+ * 1枚ぶんのシートXML。
+ * rows: [[値, …], …]（1行目が見出し）。値が数値なら数値セル、それ以外は文字列セルにする。
+ * numCols: 数値として書き出す列番号の一覧
+ */
+function sheetXml(rows, opts) {
+  opts = opts || {};
+  var numCols = opts.numCols || [];
+  var widths = opts.widths || [];
+
+  var cols = widths.length
+    ? '<cols>' + widths.map(function (w, i) {
+        return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>';
+      }).join('') + '</cols>'
+    : '';
+
+  var body = rows.map(function (row, r) {
+    var cells = row.map(function (value, c) {
+      if (value == null || value === '') return ''; // 空欄はセルごと書かない
+      var ref = colName(c) + (r + 1);
+      var style = r === 0 ? ' s="1"' : ''; // 見出しは太字
+      var isNum = r > 0 && numCols.indexOf(c) >= 0 && value !== '' && Number.isFinite(Number(value));
+      if (isNum) return '<c r="' + ref + '"' + style + '><v>' + Number(value) + '</v></c>';
+      return '<c r="' + ref + '"' + style + ' t="inlineStr"><is><t xml:space="preserve">' +
+        xmlEscape(value) + '</t></is></c>';
+    }).join('');
+    return '<row r="' + (r + 1) + '">' + cells + '</row>';
+  }).join('');
+
+  // 1行目を固定し、フィルタを付ける（現場でよく使うので既定で入れておく）
+  var lastCol = colName(Math.max(0, (rows[0] ? rows[0].length : 1) - 1));
+  var filter = opts.filter === false ? '' :
+    '<autoFilter ref="A1:' + lastCol + Math.max(1, rows.length) + '"/>';
+
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<dimension ref="A1:' + lastCol + Math.max(1, rows.length) + '"/>' +
+    '<sheetViews><sheetView workbookViewId="0">' +
+    '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
+    '</sheetView></sheetViews>' +
+    '<sheetFormatPr defaultRowHeight="15"/>' + cols +
+    '<sheetData>' + body + '</sheetData>' + filter + '</worksheet>';
+}
+
+/** 列定義から Excel の列幅を決める（指定が無ければ見出しの長さから） */
+function widthOf(col) {
+  if (col.w) return col.w;
+  var len = 0;
+  for (var i = 0; i < col.j.length; i++) len += col.j.charCodeAt(i) > 255 ? 2 : 1; // 全角は2文字ぶん
+  return Math.max(8, Math.min(24, len + 3));
+}
+
+/** 列定義とレコードから、シート1枚ぶんの行と体裁を作る */
+function sheetFrom(columns, records, extra) {
+  var rows = [columns.map(function (c) { return c.j; })];
+  records.forEach(function (rec) {
+    rows.push(columns.map(function (c) { return c.get(rec, extra ? extra(rec) : ''); }));
+  });
+  var numCols = [];
+  columns.forEach(function (c, i) { if (c.num) numCols.push(i); });
+  return { rows: rows, numCols: numCols, widths: columns.map(widthOf) };
+}
+
+/**
+ * Excelブック（.xlsx）を作る。項目名は日本語。
+ * @returns {Blob}
+ */
+function buildXlsx(trees, parks, parkNameById) {
+  var tree = sheetFrom(TREE_COLUMNS, trees, function (t) { return parkNameById[t.parkId] || ''; });
+  var park = sheetFrom(PARK_COLUMNS, parks);
+
+  var legend = [['項目', '項目名（英字）', '値', '意味']]
+    .concat(legendRows().map(function (r) { return [r[1], r[0], r[2], r[3]]; }));
+  legend.push(['', '', '', '']);
+  LEGEND_NOTES.forEach(function (note) { legend.push([note, '', '', '']); });
+
+  var sheets = [
+    { name: '樹木', xml: sheetXml(tree.rows, { numCols: tree.numCols, widths: tree.widths }) },
+    { name: '公園', xml: sheetXml(park.rows, { numCols: park.numCols, widths: park.widths }) },
+    { name: '凡例', xml: sheetXml(legend, { filter: false, widths: [22, 16, 6, 46] }) },
+  ];
+
+  var rels = sheets.map(function (s, i) {
+    return '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/' +
+      'officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>';
+  }).join('') +
+    '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/' +
+    'officeDocument/2006/relationships/styles" Target="styles.xml"/>';
+
+  var files = [
+    { name: '[Content_Types].xml', text:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      sheets.map(function (s, i) {
+        return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ' +
+          'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+      }).join('') +
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+      '</Types>' },
+    { name: '_rels/.rels', text:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+      '</Relationships>' },
+    { name: 'xl/workbook.xml', text:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' +
+      sheets.map(function (s, i) {
+        return '<sheet name="' + xmlEscape(s.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>';
+      }).join('') +
+      '</sheets></workbook>' },
+    { name: 'xl/_rels/workbook.xml.rels', text:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      rels + '</Relationships>' },
+    { name: 'xl/styles.xml', text:
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
+      '<fills count="2"><fill><patternFill patternType="none"/></fill>' +
+      '<fill><patternFill patternType="gray125"/></fill></fills>' +
+      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>' +
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+      '</styleSheet>' },
+  ].concat(sheets.map(function (s, i) {
+    return { name: 'xl/worksheets/sheet' + (i + 1) + '.xml', text: s.xml };
+  }));
+
+  return zipStore(files.map(function (f) { return { name: f.name, data: utf8(f.text) }; }));
 }
 
 /** ファイルとして保存させる */
@@ -3456,15 +3748,16 @@ function renderBackupPanel() {
     el('div', { class: 'btn-grid' }, [
       button('JSON 写真あり', 'btn btn-primary', exportFullJson),
       button('JSON 写真なし', 'btn', exportLightJson),
-      button('CSV', 'btn', exportCsv),
-      button('CSV 凡例', 'btn', function () {
-        downloadFile('kantantree-凡例-' + fileStamp() + '.csv', buildLegendCsv(), 'text/csv;charset=utf-8');
-        showToast('凡例CSVを書き出しました');
-      }),
+      button('Excel（.xlsx）', 'btn', exportXlsx),
+      button('CSV（英字）', 'btn', exportCsv),
+      button('CSV 凡例', 'btn', exportLegendCsv),
     ]),
     el('p', { class: 'hint', text:
-      '「写真あり」が端末を移すときのフルバックアップ。「写真なし」は他のアプリ（本体のReact版を含む）への受け渡し用。' +
-      'CSVはExcel（UTF-8 BOM付き）。「CSV 凡例」は 1〜4 の段階の意味をまとめた別ファイルです。' }),
+      '「写真あり」が端末を移すときのフルバックアップ。「写真なし」は他のアプリ（本体のReact版を含む）への受け渡し用。' }),
+    el('p', { class: 'hint', text:
+      'Excelは項目名が日本語で、そのまま開けます（樹木・公園・凡例の3シート。1行目は固定＋フィルタ付き）。' +
+      'CSVは項目名をスプレッドシートに合わせた英字（id / parkCode / tapeNo …）にしてあり、並びも同じなので' +
+      'シートへそのまま貼り付けられます。「CSV 凡例」は 1〜4 の段階の意味をまとめた別ファイルです。' }),
     importInput,
     el('div', { class: 'btn-row' }, [
       button('JSONを読み込む（追記マージ）', 'btn btn-wrap', function () { importInput.click(); }),
@@ -3495,6 +3788,17 @@ function exportLightJson() {
   downloadFile('kantantree-light-' + fileStamp() + '.json',
     JSON.stringify(buildLightBackup({ parks: mem.parks, trees: mem.trees })), 'application/json');
   showToast('軽量JSONを書き出しました（樹木 ' + mem.trees.length + '件）');
+}
+
+function exportXlsx() {
+  var blob = buildXlsx(mem.trees, mem.parks, parkNameMap());
+  downloadFile('kantantree-' + fileStamp() + '.xlsx', blob, XLSX_MIME);
+  showToast('Excelを書き出しました（樹木 ' + mem.trees.length + '件 / 公園 ' + mem.parks.length + '件）');
+}
+
+function exportLegendCsv() {
+  downloadFile('kantantree-凡例-' + fileStamp() + '.csv', buildLegendCsv(), 'text/csv;charset=utf-8');
+  showToast('凡例CSVを書き出しました');
 }
 
 function exportCsv() {
