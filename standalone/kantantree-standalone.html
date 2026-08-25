@@ -1,0 +1,3581 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#2f6b4f" />
+<title>かんたん樹木登録（単一ファイル版）</title>
+<!--
+  かんたん樹木登録 — 単一HTMLファイル版
+  ------------------------------------------------------------------
+  庁内など「外部のライブラリを読み込めない」環境で使うための版。
+  このファイル1つだけで動く（インターネット接続・インストール・ビルド不要）。
+
+  本体（React版）との違い
+    - 外部ライブラリを使わない（React・Dexie・Leaflet を使わず素のJavaScriptで書き直した）
+    - スプレッドシート連携（GAS同期）は入っていない
+    - GPS（現在地の取得）・地図タブは入っていない
+    - 保存先は端末内のブラウザDB（IndexedDB。使えない環境では localStorage）
+    - 本体とデータをやり取りするときは、設定タブの JSON 書き出し／読み込みを使う
+      （緯度・経度は入力できないが、読み込んだ値はそのまま保持して書き出す）
+
+  項目の定義・採番の規則・紙の調査票は本体（src/lib/inspection.js ほか）と同じ内容。
+  © 2026 Koh Kitsukawa. All rights reserved.
+-->
+<style>
+/* かんたん樹木登録 — 現場で片手で触るので、押す所は大きく、余計な装飾は入れない */
+
+:root {
+  --green: #2f6b4f;
+  --green-dark: #24523d;
+  --bg: #f6f7f5;
+  --card: #ffffff;
+  --line: #d9ddd7;
+  --text: #1d211e;
+  --muted: #6b7269;
+  --danger: #b3261e;
+  --warn: #8a6d00;
+  --tabbar-h: 56px;
+  --copyright-h: 30px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  /* iOSはアドレスバーの伸縮で 100vh が実際の表示領域とずれる。
+     dvh（動的ビューポート高さ）が使える端末ではそちらを優先する。 */
+  height: 100dvh;
+}
+
+/* --- 上部バー --- */
+.appbar {
+  background: var(--green);
+  color: #fff;
+  padding: 10px 14px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.appbar h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.appbar-sub {
+  font-size: 12px;
+  font-weight: 400;
+  background: rgba(255, 255, 255, 0.22);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.appbar-note {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+/* --- 本体 --- */
+.main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  /* 横には絶対にスクロールさせない（1箇所でも幅を超えると画面全体がずれるため） */
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.pane { padding: 12px 12px 8px; }
+.pane-form { display: flex; flex-direction: column; min-height: 100%; }
+.pad { padding: 16px; }
+
+/* --- 下部タブ（登録・一覧・設定の3つ） --- */
+.tabbar {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: #fff;
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tabbtn {
+  border: 0;
+  background: none;
+  padding: 14px 0;
+  font-size: 15px;
+  color: var(--muted);
+  font-weight: 600;
+  font-family: inherit;
+}
+.tabbtn-on { color: var(--green); box-shadow: inset 0 -3px 0 var(--green); }
+
+/* --- ブロック --- */
+.block {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.block-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--green-dark);
+}
+
+/* --- 入力 --- */
+.field { display: block; margin-bottom: 8px; flex: 1 1 0; min-width: 0; }
+/* 説明文・状態表示のすぐ下に入力欄が来るときは少し離す */
+.status + .field, .hint + .field { margin-top: 12px; }
+.field-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.field-row { display: flex; gap: 8px; }
+input[type='text'],
+input[type='search'],
+input[type='number'],
+input[type='date'],
+select,
+textarea {
+  width: 100%;
+  font-size: 16px; /* iOSで拡大されないように16px以上 */
+  font-family: inherit;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+textarea { resize: vertical; }
+.treeno-input { font-size: 22px !important; font-weight: 700; letter-spacing: 0.03em; }
+
+/* --- 点検内容の選択欄（紙のチェックシートで〇を付ける欄にあたる） --- */
+.choice-row { margin-bottom: 10px; }
+.choice-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.choice-opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.choice {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 17px;
+  font-family: inherit;
+  font-weight: 600;
+}
+.choice-on { background: var(--green); border-color: var(--green); color: #fff; }
+.choice-hint { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
+/* 選択肢に無い値を入れる欄（樹高の「他」） */
+.height-free { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.height-free input { flex: 0 0 76px; width: 76px; text-align: center; padding: 8px 4px !important; }
+.height-free .choice-hint { margin-top: 0; flex: 1 1 auto; }
+
+/* 周辺環境（道路・園路 / 電線 / 建物 をまとめた小さな囲み） */
+.env-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+  background: #fafbfa;
+}
+.env-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.env-head .choice-label { margin-bottom: 0; font-size: 13px; font-weight: 600; color: var(--green-dark); }
+.env-block .choice-row { margin-bottom: 6px; }
+.btn-small { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+.btn-on { background: var(--green); border-color: var(--green); color: #fff; }
+/* テープ番号は数字だけなので狭くてよい（樹木番号に幅を譲る） */
+.field-tape { flex: 0 0 88px; }
+.survey-summary { margin-left: 8px; font-size: 12px; }
+
+/* --- ボタン --- */
+.btn {
+  font-size: 15px;
+  font-family: inherit;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--green);
+  background: #eef3ef;
+  color: var(--green-dark);
+  font-weight: 600;
+  min-height: 44px;
+  white-space: nowrap; /* 「選択」などが2行に折れないように */
+}
+.btn:disabled { opacity: 0.45; }
+.btn-primary { background: var(--green); border-color: var(--green); color: #fff; }
+.btn-ghost { background: #fff; border-color: var(--line); color: var(--text); font-weight: 500; }
+.btn-danger { background: #fff; border-color: var(--danger); color: var(--danger); }
+.btn-big { flex: 1 1 auto; font-size: 18px; min-height: 54px; }
+.btn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn-grid {
+  display: grid;
+  /* minmax(0,1fr) にしないと、中身の幅（nowrapの長いラベル）で列が広がって画面をはみ出す */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+/* 長いラベルのボタンは折り返してよい（はみ出すより2行の方がよい） */
+.btn-grid .btn, .btn-wrap {
+  white-space: normal;
+  min-width: 0;
+  line-height: 1.3;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.disclosure {
+  border: 0;
+  background: none;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--green-dark);
+  font-weight: 600;
+  padding: 4px 0;
+}
+
+.link-row { display: flex; gap: 8px; margin-top: 8px; }
+.link-row input { flex: 1 1 auto; min-width: 0; }
+.status { margin: 8px 0 0; font-size: 13px; color: var(--green-dark); }
+.status-error { color: var(--danger); }
+.hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.muted { color: var(--muted); font-weight: 400; font-size: 13px; }
+
+/* --- 公園チップ・樹種タイル --- */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--text);
+  min-height: 42px;
+}
+.chip-on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tile {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px 4px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--text);
+  min-height: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile-on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+.tile-sub { background: #f0f1ee; font-size: 13px; }
+
+/* --- 写真 --- */
+.thumbs { display: flex; gap: 8px; margin-top: 10px; }
+.thumb {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  background: #fff;
+  width: 88px;
+  height: 88px;
+  overflow: hidden;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  font-size: 15px;
+}
+
+/* --- 登録フッター ---
+   position:fixed だと本文の上に重なって最後の項目が読めなくなる。
+   sticky にすると「場所を占有したまま下端に貼り付く」ので重ならない。 */
+.form-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: auto; /* 内容が短いときは下端に置く */
+  display: flex;
+  gap: 8px;
+  padding: 8px 0 4px;
+  background: var(--bg);
+  box-shadow: 0 -8px 12px -6px rgba(0, 0, 0, 0.12);
+}
+
+/* --- 一覧 --- */
+.parktabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  scrollbar-width: none;
+}
+.parktabs::-webkit-scrollbar { display: none; }
+.parktab {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  white-space: nowrap;
+}
+.parktab-on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.list-tools { display: flex; gap: 8px; margin-bottom: 10px; }
+.select-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+.cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--text);
+}
+.card-on { border-color: var(--green); background: #eef3ef; }
+.card-thumb {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #eceee9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.no-photo { font-size: 10px; color: var(--muted); }
+.card-body { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.card-title { font-weight: 700; font-variant-numeric: tabular-nums; }
+.card-species { font-size: 14px; }
+.card-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.badge {
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  color: var(--muted);
+}
+.badge-warn { border-color: var(--warn); color: var(--warn); }
+/* 点検で「有」だったもの（キノコ・空洞・傷・フラス ほか） */
+.badge-alert { border-color: var(--danger); color: var(--danger); font-weight: 600; }
+.checkbox { flex: 0 0 auto; width: 20px; height: 20px; border: 2px solid var(--line); border-radius: 4px; }
+.checkbox-on { background: var(--green); border-color: var(--green); }
+
+/* --- 設定の一覧行 --- */
+.rows { list-style: none; margin: 0 0 10px; padding: 0; }
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.row-main { display: flex; flex-direction: column; min-width: 0; }
+.row-actions { display: flex; gap: 6px; }
+.row-actions .btn { min-height: 38px; padding: 6px 10px; font-size: 14px; }
+.subform { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 10px; }
+
+/* --- その他 --- */
+.empty { text-align: center; padding: 40px 12px; color: var(--muted); }
+.empty .btn { margin-top: 10px; }
+.copyright {
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 0;
+  background: var(--bg);
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--tabbar-h) + var(--copyright-h) + 84px);
+  background: rgba(29, 33, 30, 0.92);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  z-index: 900;
+  max-width: 90vw;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------
+   紙の調査票のプレビュー（設定タブ → 紙の調査票）
+
+   別タブ（window.open）で開くと、ホーム画面から起動したiPhoneには
+   戻るボタンが無くアプリへ帰れない。そのためアプリの上に重ねて出し、
+   [✕ 閉じる] で戻す。用紙そのものの見た目は buildSurveySheetFragment の CSS。
+   ------------------------------------------------------------------ */
+.sheet-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #f2f2f2;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-viewer-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top)); /* iPhoneの時計に隠れないように */
+  background: var(--card, #fff);
+  border-bottom: 1px solid var(--line, #ddd);
+}
+.sheet-viewer-bar .btn { flex: 0 0 auto; width: auto; }
+.sheet-viewer-hint {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.3;
+  text-align: center;
+  background: var(--card, #fff);
+  border-top: 1px solid var(--line, #ddd);
+}
+.sheet-viewer-body { flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch; }
+@media screen {
+  /* 用紙は横281mm。「全体」のときは画面幅に収まるまで縮める。
+     zoom は箱の大きさごと縮むので、余白が残らず横スクロールも消える。
+     印刷には効かせない（原寸で出す）ので、この指定は @media screen の中だけに置く */
+  .sheet-viewer.is-fit .sheetdoc { zoom: var(--sheet-zoom, 1); }
+}
+
+@media print {
+  /* アプリ本体を隠して、用紙だけを印刷する */
+  body.sheet-open #root { display: none !important; }
+  body.sheet-open .sheet-viewer { position: static; display: block; background: none; }
+  body.sheet-open .sheet-viewer-bar { display: none !important; }
+  body.sheet-open .sheet-viewer-body { overflow: visible; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+'use strict';
+/* ==================================================================
+   かんたん樹木登録（単一ファイル版）
+
+   本体（React版）の src/ 以下を、外部ライブラリなしの素のJavaScriptへ
+   書き直したもの。中身の並びは本体のファイル構成にそろえてある。
+
+     §1 点検項目の定義        ← src/lib/inspection.js
+     §2 採番（純粋関数）      ← src/lib/treeNo.js
+     §3 公園名の照合・公園CSV ← src/lib/parkName.js / parkCsv.js
+     §4 写真の縮小            ← src/lib/image.js
+     §5 書き出し・取込        ← src/lib/io.js
+     §6 紙の調査票            ← src/lib/printSheet.js
+     §7 保存層（端末内DB）    ← src/db/db.js
+     §8 画面の下ごしらえ
+     §9 登録タブ              ← src/components/RegisterForm ほか
+     §10 一覧タブ             ← src/components/TreeList
+     §11 設定タブ             ← src/components/Settings
+     §12 起動                 ← src/App.jsx / main.jsx
+   ================================================================== */
+(function () {
+
+/* ==================================================================
+   §1 点検項目の定義（本体 src/lib/inspection.js と同じ内容）
+
+   文言は国土交通省「都市公園の樹木の点検・診断に関する指針(案)」の
+   樹木点検票(個表)に可能な限り合わせている。
+
+   コード化の原則
+     - 段階もの（順序に意味がある: 葉の茂り・活力度）は保存値を '1'〜'4' にする。
+       1 = 良い/充実 側にそろえる（国交省の活力度に合わせる）。
+     - 状態もの（有/無/未）は語のまま保存する。「未（見ていない）」を潰さないため。
+     - 選択肢は { value, label, hint } の3点で持つ。
+         value … 保存・CSVに出る値（不変にしたい）
+         label … 画面のボタンに出る表示（あとで変えてよい）
+         hint  … 補足説明
+   ================================================================== */
+
+/** 葉の茂り。1＝充実 側。※国交省様式に対応項目は無い（現場の目安として存置） */
+var LEAF_DENSITY = [
+  { value: '1', label: '濃', hint: '枝先まで密' },
+  { value: '2', label: '普', hint: 'ふつう' },
+  { value: '3', label: 'ま', hint: 'まばら（樹冠から空が透ける）' },
+  { value: '4', label: 'ほ', hint: 'ほとんどない' },
+];
+
+/** キノコ（国交省: 樹幹・大枝・地際のキノコ）。「無」と「未」を必ず区別する */
+var FUNGUS = [
+  { value: '有', label: '有', hint: 'あった' },
+  { value: '無', label: '無', hint: '見たが無かった' },
+  { value: '未', label: '未', hint: '見ていない・下草裏が見えないなどで見えない' },
+];
+
+/** キノコ部位（複数可）。値は語のまま（根/幹/枝/枯/不） */
+var FUNGUS_PART = [
+  { value: '根', label: '根', hint: '根元（地際〜50cm・露出根）' },
+  { value: '幹', label: '幹', hint: '根元より上の生きた幹' },
+  { value: '枝', label: '枝', hint: '枝の付け根' },
+  { value: '枯', label: '枯', hint: '枯枝・枯幹' },
+  { value: '不', label: '不', hint: '不明' },
+];
+
+/**
+ * 空洞・傷。国交省「樹幹の亀裂」と切り分けるため、ここは
+ * 「穴（空洞）・樹皮の広範囲な剥離」に限定する（割れ目・裂けは trunkCrack へ）。
+ */
+var CAVITY = [
+  { value: '有', label: '有', hint: '穴（空洞）・樹皮の広範囲な剥離があった' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/** 空洞・傷の位置（複数可）。根・幹・枝の3つ */
+var CAVITY_PART = [
+  { value: '根', label: '根', hint: '根元（地際〜50cm・露出根）' },
+  { value: '幹', label: '幹', hint: '根元より上の生きた幹' },
+  { value: '枝', label: '枝', hint: '枝' },
+];
+
+/** 樹幹の揺らぎ（国交省 主要項目）。押すと動く＝倒木直前のサイン */
+var TRUNK_SWAY = [
+  { value: '有', label: '有', hint: '幹を押すと根鉢ごと動く・地際が浮く' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/** 樹幹の不自然な傾斜（国交省 主要項目） */
+var TRUNK_LEAN = [
+  { value: '有', label: '有', hint: '近年傾いた・根元が持ち上がる等の不自然な傾き' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/** 樹幹の亀裂（国交省 主要項目）。旧「幹の損傷」を整理してここに寄せた */
+var TRUNK_CRACK = [
+  { value: '有', label: '有', hint: '幹の割れ目・裂け・縦の亀裂があった' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/**
+ * 結合部の異常（入り皮）。
+ * 入り皮＝二又や枝の付け根の合わせ目に樹皮が巻き込まれた状態。裂けやすい。
+ * ※国交省様式に対応項目は無い（現場で拾いたいので存置）。
+ */
+var BARK_INCLUSION = [
+  { value: '有', label: '有', hint: 'あった' },
+  { value: '無', label: '無', hint: 'なかった' },
+];
+
+/** フラス（木くずとフンが混ざったうどん状・かりんとう状の排出物）。※国交省様式に対応項目は無い */
+var FRASS = [
+  { value: '有', label: '有', hint: 'あった' },
+  { value: '無', label: '無', hint: '見たが無かった' },
+  { value: '未', label: '未', hint: '見ていない・見えない' },
+];
+
+/** 活力度・樹勢（国交省）。段階の説明は指針p.25の文言。1＝良い */
+var VIGOR = [
+  { value: '1', label: '1', hint: '良い' },
+  { value: '2', label: '2', hint: '少し悪い' },
+  { value: '3', label: '3', hint: '悪い' },
+  { value: '4', label: '4', hint: '枯死（ナラ枯れ・マツ枯れ等）' },
+];
+
+/** 活力度・樹形（国交省）。段階の説明は指針p.25の文言。1＝良い */
+var TREE_FORM = [
+  { value: '1', label: '1', hint: '望ましい樹形を保っている' },
+  { value: '2', label: '2', hint: '樹形に乱れがある' },
+  { value: '3', label: '3', hint: '樹形が著しく乱れ、回復の見込みが低い' },
+  { value: '4', label: '4', hint: '望ましい樹形が完全に崩壊している' },
+];
+
+/** 周辺環境（道路園路・電線・建物）。倒れたときに何に当たるかの目安 */
+var ENV_PRESENCE = [
+  { value: '有', label: '有', hint: 'ある' },
+  { value: '無', label: '無', hint: 'ない' },
+];
+
+/** 周辺環境の3項目。ラベルは紙の見出しに合わせる */
+var ENV_ITEMS = [
+  { key: 'envRoad', label: '道路・園路', hint: '倒れたら道路や園路にかかる' },
+  { key: 'envWire', label: '電線', hint: '枝や幹が電線に近い' },
+  { key: 'envBuilding', label: '建物', hint: '倒れたら建物にかかる' },
+];
+
+/** よく使う樹高（m）。現場では測らないので、目分量で押せるものを並べる */
+var HEIGHT_PRESETS = [3, 5, 8, 10, 15, 20];
+
+/** よく使う樹冠幅（m）。PLATEAU の veg:crownDiameter にあたる */
+var CROWN_WIDTH_PRESETS = [3, 5, 8, 10, 15];
+
+/** 区分（高木・中木・低木）。PLATEAU の veg:class にあたる */
+var VEG_CLASS = [
+  { value: '高木', label: '高木', hint: 'おおむね3m以上' },
+  { value: '中木', label: '中木', hint: 'おおむね1.5〜3m' },
+  { value: '低木', label: '低木', hint: 'おおむね1.5m未満' },
+];
+
+/** テープロール */
+var TAPE_ROLLS = ['A', 'B', 'C'];
+
+/** 樹木1本ぶんの点検項目（tree に持たせるキー） */
+var INSPECTION_FIELDS = [
+  'tapeNo', 'height', 'crownWidth', 'vegClass', 'leafDensity',
+  'fungus', 'fungusPart', 'cavity', 'cavityPart',
+  'trunkSway', 'trunkLean', 'trunkCrack', 'barkInclusion', 'frass',
+  'vigor', 'treeForm',
+  'envRoad', 'envWire', 'envBuilding', 'envNote', 'caution',
+];
+
+// ------------------------------------------------------------------
+// 部位（複数可）— キノコ部位と空洞・傷の位置で共通に使う
+//
+// 複数選べるが、CSV・JSONのどこでも同じ形で扱いたいので
+// 配列ではなく「根・幹」のような文字列1つで持つ。
+// ------------------------------------------------------------------
+
+var PART_SEP = '・';
+
+/** 保存されている文字列を配列にする（順番は定義の並びにそろえる） */
+function partList(value, options) {
+  options = options || FUNGUS_PART;
+  var chosen = String(value == null ? '' : value).split(/[・,、/\s]+/).filter(Boolean);
+  return options.map(function (p) { return p.value; }).filter(function (v) {
+    return chosen.indexOf(v) >= 0;
+  });
+}
+
+/** その部位が選ばれているか */
+function hasPart(value, code, options) {
+  return partList(value, options).indexOf(code) >= 0;
+}
+
+/** 部位の入切を切り替えた文字列を返す */
+function togglePart(value, code, options) {
+  options = options || FUNGUS_PART;
+  var cur = partList(value, options);
+  var next = cur.indexOf(code) >= 0
+    ? cur.filter(function (c) { return c !== code; })
+    : cur.concat([code]);
+  return options
+    .map(function (p) { return p.value; })
+    .filter(function (v) { return next.indexOf(v) >= 0; })
+    .join(PART_SEP);
+}
+
+/** 空の点検内容 */
+function emptyInspection() {
+  var out = {};
+  INSPECTION_FIELDS.forEach(function (k) { out[k] = ''; });
+  return out;
+}
+
+/** 樹木レコードから点検内容だけを取り出す（無い項目は空文字） */
+function pickInspection(tree) {
+  tree = tree || {};
+  var out = emptyInspection();
+  INSPECTION_FIELDS.forEach(function (key) {
+    out[key] = tree[key] == null ? '' : tree[key];
+  });
+  return out;
+}
+
+/** Date を <input type="date"> の値（YYYY-MM-DD）にする */
+function toDateInput(d) {
+  d = d || new Date();
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+/** 空の調査情報（表頭）。調査日は今日 */
+function emptySurvey() {
+  return { surveyDate: toDateInput(), surveyor: '', tapeRoll: '' };
+}
+
+/** 一覧に出す注意バッジ。「有」だったものは現場で拾いたいので目立たせる */
+function inspectionBadges(tree) {
+  tree = tree || {};
+  var badges = [];
+  if (tree.fungus === '有') badges.push('キノコ');
+  if (tree.cavity === '有') badges.push('空洞');
+  if (tree.trunkSway === '有') badges.push('揺らぎ');
+  if (tree.trunkLean === '有') badges.push('傾斜');
+  if (tree.trunkCrack === '有') badges.push('亀裂');
+  if (tree.barkInclusion === '有') badges.push('入り皮');
+  if (tree.frass === '有') badges.push('フラス');
+  return badges;
+}
+
+/** 点検内容が1つでも入っているか（重点観察区分の判定に使う） */
+function hasInspection(tree) {
+  return INSPECTION_FIELDS.some(function (key) {
+    return String((tree || {})[key] == null ? '' : (tree || {})[key]).trim() !== '';
+  });
+}
+
+/**
+ * 重点観察区分。危険度・診断結果ではなく「観察の優先度」。
+ *   3 = 重点 … キノコ有 または フラス有（菌・虫の活動サイン）
+ *   2 = 注意 … 空洞・亀裂・傾斜・揺らぎ・入り皮 のいずれか有
+ *   1 = 通常 … 上記なし・点検済み
+ *   0 = 未   … 点検項目が未入力（実質、見ていない）
+ */
+function alertLevel(tree) {
+  tree = tree || {};
+  var yes = function (k) { return tree[k] === '有'; };
+  if (yes('fungus') || yes('frass')) return 3;
+  if (yes('cavity') || yes('trunkCrack') || yes('trunkLean') || yes('trunkSway') || yes('barkInclusion')) {
+    return 2;
+  }
+  return hasInspection(tree) ? 1 : 0;
+}
+
+/** 重点観察区分の表示名（凡例用） */
+var ALERT_LABELS = { 3: '重点', 2: '注意', 1: '通常', 0: '未点検' };
+
+/**
+ * 「見つけたらすぐ連絡すること」（紙の運用ルール4）にあたるものを文にして返す。
+ * 現場でその場に立っているうちに気づけるよう、入力した直後に画面へ出す。
+ */
+function urgentNotes(v) {
+  v = v || {};
+  var notes = [];
+  if (v.frass === '有') {
+    notes.push('フラス「有」→ 全景と近景（形が分かるように）を撮影し、可能なら持ち帰る。すぐ連絡すること。');
+  }
+  if (v.fungus === '有' && hasPart(v.fungusPart, '根')) {
+    // キノコの大小は腐朽の程度の目安にならない（小さくても内部の腐朽が進んでいることが多い）
+    notes.push('根元のキノコ → 大小に関わらずすぐ連絡すること（小さくても内部の腐朽が進んでいることがある）。');
+  }
+  if (v.cavity === '有' && v.envRoad === '有') {
+    notes.push('空洞・傷があり、道路・園路がそば → 倒れたときの影響が大きい。連絡すること。');
+  }
+  return notes;
+}
+
+/** 保存値（value）から表示ラベルを引く。該当が無ければ元の値をそのまま返す */
+function labelOf(options, value) {
+  var hit = options.filter(function (o) { return o.value === value; })[0];
+  return hit ? hit.label : String(value == null ? '' : value);
+}
+
+/** 葉の茂りの表示ラベル（例: '2' → '普'） */
+function leafDensityLabel(value) { return labelOf(LEAF_DENSITY, value); }
+
+/* ==================================================================
+   §2 採番（本体 src/lib/treeNo.js と同じ内容）
+   ここは「純粋関数」だけを置く。DBには触らない。
+   ================================================================== */
+
+/** 公園コードの書式チェック（半角英数とハイフンのみ・1文字以上） */
+function isValidParkCode(code) {
+  return typeof code === 'string' && /^[0-9A-Za-z-]+$/.test(code);
+}
+
+/**
+ * 既存の公園コード一覧から、次に使う公園コードを求める。
+ * 'P' + 数字 形式のものだけを見て、その最大値 + 1 を返す。欠番は埋めない。
+ */
+function nextParkCode(existingCodes) {
+  var max = 0;
+  (existingCodes || []).forEach(function (code) {
+    var m = /^P(\d+)$/.exec(String(code == null ? '' : code).trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return 'P' + String(max + 1).padStart(3, '0');
+}
+
+/** 公園コードと連番から樹木番号をつくる（例: 'P001', 4 → 'P001004'） */
+function formatTreeNo(parkCode, seq) {
+  return String(parkCode) + String(seq).padStart(3, '0');
+}
+
+/** テープ番号を「ロール記号＋連番」に分ける */
+function parseTapeNo(tapeNo) {
+  var m = /^\s*([A-Za-z]*)\s*(\d+)\s*$/.exec(String(tapeNo == null ? '' : tapeNo));
+  return m ? { prefix: m[1].toUpperCase(), seq: parseInt(m[2], 10) } : null;
+}
+
+/**
+ * 次のテープ番号を求める。
+ * 紙の運用ルール2:「ロールは使い切るまで場所をまたいで連続して使う」。
+ * したがって公園では絞らず、端末にあるテープ番号ぜんぶの最大値 +1 を返す。
+ * 連番は4桁にそろえる（ラベルに巻いたときに桁がそろって読みやすいため）。
+ */
+function nextTapeNo(existingTapeNos, roll) {
+  var parsed = (existingTapeNos || []).map(parseTapeNo).filter(Boolean);
+  var want = String(roll == null ? '' : roll).trim().toUpperCase();
+
+  // ロールを選んでいれば、その記号のものだけを見る
+  var pool = want ? parsed.filter(function (p) { return p.prefix === want; }) : parsed;
+  var prefix = want;
+
+  // その記号の記録がまだ無いなら、記号を書かない運用の続きとみなす
+  if (want && !pool.length) {
+    var plain = parsed.filter(function (p) { return p.prefix === ''; });
+    if (plain.length) { pool = plain; prefix = ''; }
+  }
+  // ロール未選択のときは、いちばん大きい番号の記号に合わせる
+  if (!want) {
+    var top = pool.reduce(function (best, p) {
+      return p.seq > (best ? best.seq : -1) ? p : best;
+    }, null);
+    prefix = top ? top.prefix : '';
+  }
+
+  var max = pool.reduce(function (m, p) { return Math.max(m, p.seq); }, 0);
+  return prefix + String(max + 1).padStart(4, '0');
+}
+
+/**
+ * テープ番号から樹木番号を作る。区切りの「-」は入れない。
+ * 数字だけのテープ番号は3桁に揃え、それ以外（'A0201' '12b' など）はそのまま後ろに付ける。
+ */
+function treeNoFromTape(parkCode, tapeNo) {
+  var tape = String(tapeNo == null ? '' : tapeNo).trim();
+  if (!parkCode || !tape) return '';
+  return /^\d+$/.test(tape) ? formatTreeNo(parkCode, parseInt(tape, 10)) : String(parkCode) + tape;
+}
+
+/** 樹木番号から連番部分を取り出す。公園コードで始まらない／続きが数字でなければ null */
+function parseTreeSeq(treeNo, parkCode) {
+  if (typeof treeNo !== 'string' || !parkCode) return null;
+  if (treeNo.indexOf(parkCode) !== 0) return null;
+  var rest = treeNo.slice(parkCode.length);
+  if (!/^\d+$/.test(rest)) return null;
+  return parseInt(rest, 10);
+}
+
+/** その公園の次の樹木番号（既存の連番の最大値 + 1。カウンタは保存しない） */
+function nextTreeNo(parkCode, existingTreeNos) {
+  var max = 0;
+  (existingTreeNos || []).forEach(function (treeNo) {
+    var seq = parseTreeSeq(treeNo, parkCode);
+    if (seq !== null) max = Math.max(max, seq);
+  });
+  return formatTreeNo(parkCode, max + 1);
+}
+
+/** 公園コードを変更したときの樹木番号の付け替え（手書きの番号はそのまま残す） */
+function renameTreeNoPrefix(treeNo, oldCode, newCode) {
+  if (typeof treeNo !== 'string' || !oldCode) return treeNo;
+  if (treeNo.indexOf(oldCode) !== 0) return treeNo;
+  return newCode + treeNo.slice(oldCode.length);
+}
+
+/* ==================================================================
+   §3 公園名の照合・公園CSV（本体 src/lib/parkName.js / parkCsv.js）
+   ================================================================== */
+
+/** 照合用キー正規化: 空白除去・全角半角統一・ヶ→ケ・漢数字→算用数字 */
+function normalizeParkKey(s) {
+  if (!s) return '';
+  var t = String(s).normalize('NFKC').replace(/[\s　]/g, '');
+  t = t.replace(/ヶ/g, 'ケ').replace(/ヵ/g, 'カ');
+  var kan = { '〇': '0', '一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9' };
+  t = t.replace(/[〇一二三四五六七八九]/g, function (c) { return kan[c]; });
+  return t.toLowerCase();
+}
+
+/** キーが一致する公園を返す。無ければ null（selfId の公園は除く） */
+function findParkByName(parks, name, selfId) {
+  if (!name) return null;
+  var key = normalizeParkKey(name);
+  if (!key) return null;
+  return parks.filter(function (p) {
+    return p.id !== selfId && normalizeParkKey(p.name) === key;
+  })[0] || null;
+}
+
+/** 近い候補を最大3件返す（部分一致・前方一致） */
+function parkCandidates(parks, name, selfId) {
+  var key = normalizeParkKey(name);
+  if (!key) return [];
+  return parks
+    .filter(function (p) {
+      if (p.id === selfId) return false;
+      var k = normalizeParkKey(p.name);
+      return k.indexOf(key) >= 0 || key.indexOf(k) >= 0 ||
+        (key.length >= 2 && k.slice(0, 2) === key.slice(0, 2));
+    })
+    .slice(0, 3)
+    .map(function (p) { return p.name; });
+}
+
+/** 公園名の列に使える見出し（樹木台帳メモと同じ順で探す） */
+var NAME_HEADERS = ['児童遊園地名', '公園名', 'タイトル'];
+var LAT_HEADERS = ['緯度', 'lat', 'Lat', 'latitude'];
+var LNG_HEADERS = ['経度', 'lng', 'lon', 'Lng', 'longitude'];
+
+/** CSV 1行パース（ダブルクオート対応） */
+function parseCsvLine(line) {
+  var out = [];
+  var cur = '';
+  var inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false;
+      } else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+/** 文字コード自動判定（UTF-8で化けたらShift_JISで読み直す） */
+function decodeCsvBuffer(buf) {
+  var text = new TextDecoder('utf-8').decode(buf);
+  if (text.indexOf('�') >= 0) {
+    try { text = new TextDecoder('shift_jis').decode(buf); } catch (e) { /* 対応していない環境ではUTF-8のまま */ }
+  }
+  return text.replace(/^﻿/, '');
+}
+
+function findCol(header, candidates) {
+  for (var i = 0; i < candidates.length; i++) {
+    var at = header.indexOf(candidates[i]);
+    if (at >= 0) return at;
+  }
+  return -1;
+}
+
+function toNum(s) {
+  var t = String(s == null ? '' : s).trim();
+  if (!t) return null;
+  var n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** CSVテキストから公園の行を取り出す */
+function parseParkCsv(text) {
+  var lines = String(text == null ? '' : text).split(/\r?\n/).filter(function (l) { return l.trim(); });
+  if (lines.length < 2) return { ok: false, reason: 'データ行がありません。' };
+
+  var header = parseCsvLine(lines[0]);
+  var nameCol = findCol(header, NAME_HEADERS);
+  if (nameCol < 0) {
+    return { ok: false, reason: '公園名の列が見つかりません（' + NAME_HEADERS.join(' / ') + ' のいずれかが必要です）。' };
+  }
+  var idCol = header.indexOf('ID');
+  var latCol = findCol(header, LAT_HEADERS);
+  var lngCol = findCol(header, LNG_HEADERS);
+
+  var rows = [];
+  for (var i = 1; i < lines.length; i++) {
+    var cells = parseCsvLine(lines[i]);
+    var name = (cells[nameCol] || '').trim();
+    if (!name) continue;
+    rows.push({
+      name: name,
+      pid: idCol >= 0 ? (cells[idCol] || '').trim() : '',
+      lat: latCol >= 0 ? toNum(cells[latCol]) : null,
+      lng: lngCol >= 0 ? toNum(cells[lngCol]) : null,
+    });
+  }
+  if (!rows.length) return { ok: false, reason: '公園名の入った行がありませんでした。' };
+  return { ok: true, rows: rows };
+}
+
+/* ==================================================================
+   §4 写真の縮小（本体 src/lib/image.js）
+   撮影したままの画像は数MBあるため、保存前に必ず通す。
+   ================================================================== */
+
+var MAX_EDGE = 1280;      // 長辺の上限(px)
+var QUALITY = 0.7;        // JPEG品質
+var THUMB_EDGE = 240;     // 一覧用サムネイルの長辺(px)
+var THUMB_QUALITY = 0.6;
+
+function loadImage(file) {
+  return new Promise(function (resolve, reject) {
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('画像を読み込めませんでした')); };
+    img.src = url;
+  });
+}
+
+function drawToDataUrl(img, maxEdge, quality) {
+  var scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+  var w = Math.round(img.naturalWidth * scale);
+  var h = Math.round(img.naturalHeight * scale);
+  var canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+/** 撮影・選択したファイルを保存用（長辺1280 / 品質0.7）に縮小する */
+function resizePhoto(file) {
+  return loadImage(file).then(function (img) { return drawToDataUrl(img, MAX_EDGE, QUALITY); });
+}
+
+/** 一覧に出すサムネイル（長辺240）を dataUrl から作る */
+function makeThumb(dataUrl) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image();
+    img.onload = function () { resolve(drawToDataUrl(img, THUMB_EDGE, THUMB_QUALITY)); };
+    img.onerror = function () { reject(new Error('サムネイルを作成できませんでした')); };
+    img.src = dataUrl;
+  });
+}
+
+/** バイト数を読みやすい単位にする */
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  var units = ['B', 'KB', 'MB', 'GB'];
+  var i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+
+/* ==================================================================
+   §5 書き出し・取込（本体 src/lib/io.js）
+
+   単一ファイル版では GeoJSON（GIS向け）は外してある（地図機能なしのため）。
+   ただし緯度・経度の列・項目は残してあるので、本体で入れた座標は
+   JSON／CSV を通しても消えない。
+   ================================================================== */
+
+var BACKUP_FORMAT = 'kantantree-backup';
+var BACKUP_VERSION = 1;
+
+/** フルバックアップ（写真のBase64込み） */
+function buildFullBackup(all) {
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    kind: 'full',
+    exportedAt: new Date().toISOString(),
+    parks: all.parks,
+    trees: all.trees,
+    photos: all.photos,
+    settings: all.settings,
+  };
+}
+
+/** 軽量JSON（写真なし・他アプリへの受け渡し用） */
+function buildLightBackup(all) {
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    kind: 'light',
+    exportedAt: new Date().toISOString(),
+    parks: all.parks,
+    trees: all.trees.map(function (t) {
+      var copy = Object.assign({}, t);
+      delete copy.thumb; // サムネイルは載せない
+      return copy;
+    }),
+    photos: [],
+  };
+}
+
+// 並びは国交省様式・紙のチェックシートに合わせてある（本体のCSVと同じ並び）。
+// 段階もの（葉の茂り・活力度）は値が 1〜4 なので、別途「凡例」を buildLegendCsv で出す。
+var CSV_COLUMNS = [
+  ['id', function (t) { return t.id; }],
+  ['公園コード', function (t) { return t.parkCode || ''; }],
+  ['公園名', function (t, parkName) { return parkName; }],
+  ['テープ番号', function (t) { return t.tapeNo || ''; }],
+  ['樹木番号', function (t) { return t.treeNo || ''; }],
+  ['樹種', function (t) { return t.species || ''; }],
+  ['重点観察', function (t) { return t.alertLevel == null ? '' : t.alertLevel; }],
+  ['樹高m', function (t) { return t.height == null ? '' : t.height; }],
+  ['樹冠幅m', function (t) { return t.crownWidth == null ? '' : t.crownWidth; }],
+  ['区分', function (t) { return t.vegClass || ''; }],
+  ['葉の茂り', function (t) { return t.leafDensity || ''; }],
+  ['キノコ', function (t) { return t.fungus || ''; }],
+  ['キノコ部位', function (t) { return t.fungusPart || ''; }],
+  ['空洞・傷', function (t) { return t.cavity || ''; }],
+  ['空洞・傷の位置', function (t) { return t.cavityPart || ''; }],
+  ['樹幹の揺らぎ', function (t) { return t.trunkSway || ''; }],
+  ['樹幹の不自然な傾斜', function (t) { return t.trunkLean || ''; }],
+  ['樹幹の亀裂', function (t) { return t.trunkCrack || ''; }],
+  ['結合部の異常', function (t) { return t.barkInclusion || ''; }],
+  ['フラス', function (t) { return t.frass || ''; }],
+  ['活力度_樹勢', function (t) { return t.vigor || ''; }],
+  ['活力度_樹形', function (t) { return t.treeForm || ''; }],
+  ['道路園路', function (t) { return t.envRoad || ''; }],
+  ['電線', function (t) { return t.envWire || ''; }],
+  ['建物', function (t) { return t.envBuilding || ''; }],
+  ['周辺環境備考', function (t) { return t.envNote || ''; }],
+  ['注意', function (t) { return t.caution || ''; }],
+  ['写真枚数', function (t) { return t.photoCount == null ? '' : t.photoCount; }],
+  ['調査日', function (t) { return t.surveyDate || ''; }],
+  ['調査者', function (t) { return t.surveyor || ''; }],
+  ['テープロール', function (t) { return t.tapeRoll || ''; }],
+  ['緯度', function (t) { return t.lat == null ? '' : String(t.lat); }],
+  ['経度', function (t) { return t.lng == null ? '' : String(t.lng); }],
+  ['誤差m', function (t) { return t.accuracy == null ? '' : Math.round(t.accuracy); }],
+  ['座標入力元', function (t) { return t.coordSource || ''; }],
+  ['幹周cm', function (t) { return t.girth == null ? '' : t.girth; }],
+  ['メモ', function (t) { return t.note || ''; }],
+  ['幹の損傷_旧', function (t) { return t.trunkDamageLegacy || ''; }],
+  ['登録日時', function (t) { return t.registeredAt || ''; }],
+  ['更新日時', function (t) { return t.updatedAt || ''; }],
+];
+
+function csvCell(value) {
+  var s = String(value == null ? '' : value);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/** CSV文字列を作る（Excel対策で先頭にBOMを付ける） */
+function buildCsv(trees, parkNameById) {
+  parkNameById = parkNameById || {};
+  var header = CSV_COLUMNS.map(function (c) { return c[0]; }).join(',');
+  var rows = trees.map(function (t) {
+    return CSV_COLUMNS.map(function (c) {
+      return csvCell(c[1](t, parkNameById[t.parkId] || ''));
+    }).join(',');
+  });
+  return '﻿' + [header].concat(rows).join('\r\n') + '\r\n';
+}
+
+/**
+ * 凡例CSV。段階もの（1〜4）や重点観察区分の意味を別ファイルで添える。
+ * 本体CSVに凡例行を混ぜると機械取込が壊れるため、凡例は別に出す。
+ */
+function buildLegendCsv() {
+  var rows = [['項目', '値', '意味']];
+  var push = function (name, options) {
+    options.forEach(function (o) { rows.push([name, o.value, o.hint || o.label]); });
+  };
+  push('葉の茂り', LEAF_DENSITY);
+  push('活力度_樹勢', VIGOR);
+  push('活力度_樹形', TREE_FORM);
+  Object.keys(ALERT_LABELS).forEach(function (value) {
+    rows.push(['重点観察', value, ALERT_LABELS[value]]);
+  });
+  return '﻿' + rows.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n') + '\r\n';
+}
+
+/** ファイルとして保存させる */
+function downloadFile(filename, content, mime) {
+  var blob = content instanceof Blob ? content : new Blob([content], { type: mime });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+/** 書き出しファイル名に付ける日時（例 20260727-1432） */
+function fileStamp(d) {
+  d = d || new Date();
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes());
+}
+
+/**
+ * 取込内容を「追加するもの」「更新するもの」に仕分ける（純粋関数）。
+ * 規則: id が一致したら updatedAt の新しい方を採用。未知の id は追加。
+ */
+function planMerge(existing, incoming) {
+  var plan = { parks: { add: [], update: [] }, trees: { add: [], update: [] }, skipped: 0 };
+
+  var byId = function (list) {
+    var m = new Map();
+    (list || []).forEach(function (r) { m.set(r.id, r); });
+    return m;
+  };
+  var existingParks = byId(existing.parks);
+  var existingTrees = byId(existing.trees);
+
+  var sort = function (incomingList, existingMap, bucket) {
+    (incomingList || []).forEach(function (rec) {
+      if (!rec || !rec.id) return;
+      var cur = existingMap.get(rec.id);
+      if (!cur) bucket.add.push(rec);
+      else if (String(rec.updatedAt || '') > String(cur.updatedAt || '')) bucket.update.push(rec);
+      else plan.skipped += 1;
+    });
+  };
+
+  sort(incoming.parks, existingParks, plan.parks);
+  sort(incoming.trees, existingTrees, plan.trees);
+  return plan;
+}
+
+/** 読み込んだJSONがこのアプリのバックアップとして扱える形かを確かめる */
+function validateBackup(data) {
+  if (!data || typeof data !== 'object') return 'JSONとして読み取れませんでした。';
+  if (!Array.isArray(data.parks) || !Array.isArray(data.trees)) {
+    return 'このファイルには parks / trees が入っていません。';
+  }
+  if (data.format && data.format !== BACKUP_FORMAT) {
+    return '別のアプリのファイルのようです（format: ' + data.format + '）。';
+  }
+  return null;
+}
+
+/* ==================================================================
+   §6 紙の調査票（本体 src/lib/printSheet.js）
+
+   アプリを使わない人が記入するための用紙。項目・選択肢・凡例は
+   §1 の定義から組み立てるので、項目を足せば紙にも自動でつく。
+   用紙: A4横・2枚（1枚目が記入表、2枚目が凡例と運用のきまり）。
+   ================================================================== */
+
+/** 選択肢の並びを「濃 普 ま ほ」のような1つの文字列にする（〇を付けてもらう） */
+function marks(options) {
+  return options.map(function (o) { return o.label; }).join(' ');
+}
+
+/**
+ * 用紙の列。
+ *   key … アプリのフィールド名 / head … 見出し
+ *   choices … あらかじめ刷っておく選択肢（〇で囲む）。空なら手書き欄
+ *   mm … 列幅。合計281mm（A4横297mm − 余白8mm×2）。足したらどこかを削ること
+ *
+ * 見出しは横書きのまま折り返す。縦書き（writing-mode）は、縦書き用グリフを持たない
+ * フォントだと漢字が消えることがあり、印刷する端末を選べない用紙では危ないので使わない。
+ */
+var SHEET_COLUMNS = [
+  { key: 'tapeNo', head: 'テープ番号', mm: 13 },
+  { key: 'treeNo', head: '樹木番号', sub: '公園コード+テープ番号', mm: 17 },
+  { key: 'species', head: '樹種', sub: '不明可', mm: 17 },
+  { key: 'height', head: '樹高', sub: 'm', mm: 9 },
+  { key: 'crownWidth', head: '樹冠幅', sub: 'm', mm: 9 },
+  { key: 'vegClass', head: '区分', choices: marks(VEG_CLASS), mm: 17 },
+  { key: 'leafDensity', head: '葉の茂り', choices: marks(LEAF_DENSITY), mm: 13 },
+  { key: 'fungus', head: 'キノコ', choices: marks(FUNGUS), mm: 11 },
+  { key: 'fungusPart', head: 'キノコ部位', choices: marks(FUNGUS_PART), mm: 16 },
+  { key: 'cavity', head: '空洞・傷', choices: marks(CAVITY), mm: 9 },
+  { key: 'cavityPart', head: '空洞の位置', choices: marks(CAVITY_PART), mm: 11 },
+  { key: 'trunkSway', head: '揺らぎ', choices: marks(TRUNK_SWAY), mm: 9 },
+  { key: 'trunkLean', head: '傾斜', choices: marks(TRUNK_LEAN), mm: 9 },
+  { key: 'trunkCrack', head: '亀裂', choices: marks(TRUNK_CRACK), mm: 9 },
+  { key: 'barkInclusion', head: '入り皮', choices: marks(BARK_INCLUSION), mm: 9 },
+  { key: 'frass', head: 'フラス', choices: marks(FRASS), mm: 11 },
+  { key: 'vigor', head: '樹勢', choices: marks(VIGOR), mm: 12 },
+  { key: 'treeForm', head: '樹形', choices: marks(TREE_FORM), mm: 12 },
+  { key: 'envRoad', head: '道路園路', choices: marks(ENV_PRESENCE), mm: 9 },
+  { key: 'envWire', head: '電線', choices: marks(ENV_PRESENCE), mm: 9 },
+  { key: 'envBuilding', head: '建物', choices: marks(ENV_PRESENCE), mm: 9 },
+  { key: 'envNote', head: '周辺環境の備考', mm: 14 },
+  { key: 'caution', head: '注意', mm: 15 },
+  { key: 'photoCount', head: '写真', sub: '枚', mm: 9 },
+];
+
+/** 記入の凡例（2枚目）。説明文は §1 の hint をそのまま使う */
+var LEGEND_SECTIONS = [
+  { title: '葉の茂り', options: LEAF_DENSITY, note: '迷ったら「普」' },
+  { title: 'キノコ', options: FUNGUS, note: '「無（見たが無かった）」と「未（見ていない）」を必ず区別する' },
+  { title: 'キノコ部位', options: FUNGUS_PART, note: '当てはまるものすべてに〇' },
+  { title: '空洞・傷', options: CAVITY, note: '割れ目・裂けは「亀裂」の欄へ' },
+  { title: '空洞・傷の位置', options: CAVITY_PART, note: '当てはまるものすべてに〇' },
+  { title: '樹幹の揺らぎ', options: TRUNK_SWAY },
+  { title: '樹幹の不自然な傾斜', options: TRUNK_LEAN },
+  { title: '樹幹の亀裂', options: TRUNK_CRACK },
+  { title: '結合部の異常（入り皮）', options: BARK_INCLUSION },
+  { title: 'フラス', options: FRASS },
+  { title: '活力度・樹勢', options: VIGOR },
+  { title: '活力度・樹形', options: TREE_FORM },
+  { title: '区分', options: VEG_CLASS },
+  { title: '周辺環境（道路園路・電線・建物）', options: ENV_PRESENCE, note: '倒れたときに何にかかるかの目安' },
+];
+
+/** 運用のきまり（紙の「記入ルールと運用」） */
+var RULES = [
+  ['手順（1本あたり）',
+   'ロールからテープを取り、幹の地上約1.5mに巻く（締めつけない）→ テープ番号を書く → ' +
+   'この用紙に記入 → 写真撮影（スタッフを立てておおよそのサイズ感を残す）'],
+  ['測らない',
+   '巻尺・測定機器は不要。木に登る、脚立を使う等はしない。地上から見える範囲だけを見る。' +
+   '樹高・樹冠幅は目分量でよい'],
+  ['テープ番号',
+   'ロールは使い切るまで場所をまたいで連続して使う（場所ごとに区切らない）。' +
+   '一度使った番号は二度と使わない（伐採後も他の木に使い回さない）'],
+  ['1行＝1本',
+   '幹が根元から複数に分岐している株立ちの個体も、1本として1行に書く'],
+  ['この点検でやらないこと',
+   'どこに何本あり、どれに異変があるかを記録するためのもの。倒木の危険度は判定しない。' +
+   '「葉の茂り」は簡易な観察項目であり、活力度・健全度の区分とは別のもの。' +
+   '樹種が分からなければ「不明」と書く（無理に推測しない）'],
+];
+
+/** 見つけたらすぐ連絡すること */
+var URGENT_RULES = [
+  'フラスが「有」の木 → 全景と近景（形が分かるように）を撮影。可能なら持ち帰る',
+  '根元にキノコがある木（大小は問わない。小さくても内部の腐朽が進んでいることがある）',
+  '幹が明らかに傾いている木・園路や車道に倒れそうな木・頭上に枯れた大枝がある木',
+];
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+/**
+ * 用紙のCSS。scope に '.sheetdoc' を渡すとアプリの中に貼っても他の画面に影響しない
+ * （h1 / table のような広い指定がアプリ側へ漏れないようにするため）。
+ */
+function sheetCss(scope) {
+  scope = scope || '';
+  var root = scope || 'body';
+  var s = scope ? scope + ' ' : '';
+  return '\n' +
+'@page { size: A4 landscape; margin: 8mm; }\n' +
+s + '* { box-sizing: border-box; }\n' +
+root + ' {\n' +
+'  margin: 0;\n' +
+"  font-family: 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', sans-serif;\n" +
+'  color: #000;\n' +
+'  font-size: 9pt;\n' +
+'}\n' +
+s + '.sheet { page-break-after: always; }\n' +
+s + '.sheet:last-child { page-break-after: auto; }\n' +
+s + 'h1 { font-size: 13pt; margin: 0 0 3mm; text-align: center; letter-spacing: 0.1em; }\n' +
+s + 'h2 { font-size: 9.5pt; margin: 2.5mm 0 1.5mm; border-bottom: 1px solid #000; padding-bottom: 0.8mm; }\n' +
+s + 'table { border-collapse: collapse; width: 100%; table-layout: fixed; }\n' +
+s + 'th, ' + s + 'td { border: 0.4pt solid #000; padding: 0.6mm 0.4mm; vertical-align: middle; }\n' +
+s + '.head td { height: 8mm; font-size: 9pt; padding: 1mm 2mm; }\n' +
+s + '.head .label { width: 18mm; background: #f0f0f0; font-weight: 600; white-space: nowrap; }\n' +
+s + '.grid th {\n' +
+'  background: #f0f0f0;\n' +
+'  font-size: 7pt;\n' +
+'  line-height: 1.25;\n' +
+'  height: 13mm;\n' +
+'  font-weight: 600;\n' +
+'  word-break: break-all;\n' + /* 「道路園路」のような4文字を2行に折り返して細い列に収める */
+'}\n' +
+s + '.grid th .sub { display: block; font-size: 5.5pt; font-weight: 400; word-break: normal; }\n' +
+s + '.grid td { text-align: center; font-size: 7pt; white-space: nowrap; color: #333; }\n' +
+s + '.grid td.write { color: #000; }\n' +
+s + '.note { font-size: 7.5pt; margin: 2mm 0 0; line-height: 1.5; }\n' +
+s + '.legend { column-count: 3; column-gap: 6mm; font-size: 7.5pt; }\n' +
+s + '.legend section { break-inside: avoid; margin-bottom: 2mm; }\n' +
+s + '.legend h3 { font-size: 8pt; margin: 0 0 0.5mm; }\n' +
+s + '.legend ul { margin: 0; padding-left: 4mm; line-height: 1.35; }\n' +
+s + '.legend .memo { color: #444; line-height: 1.35; }\n' +
+s + '.rules { font-size: 7.5pt; line-height: 1.4; margin: 0; column-count: 2; column-gap: 6mm; }\n' +
+s + '.rules div { break-inside: avoid; margin-bottom: 1.5mm; }\n' +
+s + '.rules b { display: block; }\n' +
+s + '.urgent { border: 1.2pt solid #000; padding: 2mm 3mm; margin-top: 2mm; font-size: 8pt; }\n' +
+s + '.urgent ul { margin: 1mm 0 0; padding-left: 5mm; }\n' +
+s + '.urgent li { line-height: 1.45; }\n' +
+s + '.foot { margin-top: 4mm; font-size: 7.5pt; color: #333; display: flex; justify-content: space-between; }\n' +
+'@media screen {\n' +
+'  ' + root + ' { background: #f2f2f2; padding: 8mm; }\n' +
+'  ' + s + '.sheet { background: #fff; padding: 8mm; margin: 0 auto 8mm; width: 281mm; box-shadow: 0 1px 6px rgba(0,0,0,.25); }\n' +
+'}\n';
+}
+
+/** 表頭（場所・調査日・調査者・テープロール） */
+function headerHtml(o) {
+  var roll = TAPE_ROLLS.map(function (r) {
+    return r === o.tapeRoll ? '<u>' + esc(r) + '</u>' : esc(r);
+  }).join(' ・ ');
+  return '<table class="head"><tr>' +
+    '<td class="label">場所</td><td>' + esc(o.parkName) + '</td>' +
+    '<td class="label">調査日</td><td>' + (esc(o.surveyDate) || '　　　年　　月　　日') + '</td>' +
+    '<td class="label">調査者</td><td>' + esc(o.surveyor) + '</td>' +
+    '<td class="label">テープロール</td><td>' + roll + '</td>' +
+    '</tr></table>';
+}
+
+/**
+ * 行の高さは行数から決める。A4横の本文に使える高さ（およそ136mm）を行数で割り、
+ * 手で書ける下限6mm・上げすぎない上限11mm に収める。
+ */
+function rowHeightMm(rows) {
+  return Math.min(11, Math.max(6, Math.round((136 / Math.max(1, rows)) * 10) / 10));
+}
+
+function gridHtml(rows) {
+  var h = rowHeightMm(rows);
+  var cols = SHEET_COLUMNS.map(function (c) { return '<col style="width:' + c.mm + 'mm">'; }).join('');
+  var head = SHEET_COLUMNS.map(function (c) {
+    return '<th>' + esc(c.head) + (c.sub ? '<span class="sub">' + esc(c.sub) + '</span>' : '') + '</th>';
+  }).join('');
+  var body = '';
+  for (var i = 0; i < rows; i++) {
+    body += '<tr style="height:' + h + 'mm">' + SHEET_COLUMNS.map(function (c) {
+      return '<td class="' + (c.choices ? '' : 'write') + '">' + esc(c.choices || '') + '</td>';
+    }).join('') + '</tr>';
+  }
+  return '<table class="grid"><colgroup>' + cols + '</colgroup><thead><tr>' + head +
+    '</tr></thead><tbody>' + body + '</tbody></table>';
+}
+
+/** 2枚目（記入の凡例＋運用のきまり） */
+function legendHtml() {
+  var sections = LEGEND_SECTIONS.map(function (sec) {
+    var items = sec.options.map(function (o) {
+      return '<li><b>' + esc(o.label) + '</b> … ' + esc(o.hint || '') + '</li>';
+    }).join('');
+    var note = sec.note ? '<div class="memo">※ ' + esc(sec.note) + '</div>' : '';
+    return '<section><h3>' + esc(sec.title) + '</h3><ul>' + items + '</ul>' + note + '</section>';
+  }).join('');
+
+  var rules = RULES.map(function (r) { return '<div><b>' + esc(r[0]) + '</b>' + esc(r[1]) + '</div>'; }).join('');
+  var urgent = URGENT_RULES.map(function (u) { return '<li>' + esc(u) + '</li>'; }).join('');
+
+  return '<div class="sheet">' +
+    '<h1>樹木点検 現地チェックシート — 記入の凡例</h1>' +
+    '<div class="legend">' + sections + '</div>' +
+    '<h2>運用のきまり</h2>' +
+    '<div class="rules">' + rules + '</div>' +
+    '<div class="urgent"><b>見つけたらすぐ連絡すること</b><ul>' + urgent + '</ul></div>' +
+    '<div class="foot"><span>© 2026 Koh Kitsukawa. All rights reserved.</span><span>2/2</span></div>' +
+    '</div>';
+}
+
+/** 用紙2枚ぶんの中身（1枚目＝記入表、2枚目＝凡例） */
+function sheetsHtml(o) {
+  return '<div class="sheet">' +
+    '<h1>樹木点検　現地チェックシート</h1>' +
+    headerHtml(o) +
+    gridHtml(o.rows) +
+    '<p class="note"><b>1行＝1本。</b>株立ち（幹が根元から複数に分岐している個体）も1本として1行に書く。' +
+    'あてはまる選択肢を〇で囲む。空欄のままでもよい（分からない・見ていない項目は無理に埋めない）。' +
+    '記入の凡例と運用のきまりは<b>2枚目</b>を参照。</p>' +
+    '<div class="foot"><span>© 2026 Koh Kitsukawa. All rights reserved.</span><span>1/2</span></div>' +
+    '</div>' + legendHtml();
+}
+
+var SHEET_DEFAULTS = { parkName: '', surveyDate: '', surveyor: '', tapeRoll: '', rows: 14 };
+
+/** 紙の調査票（そのまま印刷できる1つのHTML文書）。「HTMLで保存」で書き出す中身 */
+function buildSurveySheetHtml(o) {
+  var opts = Object.assign({}, SHEET_DEFAULTS, o || {});
+  return '<!doctype html>\n<html lang="ja"><head><meta charset="utf-8">\n' +
+    '<title>樹木点検 現地チェックシート</title>\n' +
+    '<style>' + sheetCss('') +
+    '@media screen { .toolbar { position: sticky; top: 0; text-align: center; margin-bottom: 6mm; }' +
+    ' .toolbar button { font: inherit; font-size: 11pt; padding: 8px 20px; cursor: pointer; } }\n' +
+    '@media print { .toolbar { display: none; } }' +
+    '</style></head>\n<body>\n' +
+    '<div class="toolbar"><button type="button" onclick="window.print()">🖨 印刷する</button></div>\n' +
+    sheetsHtml(opts) + '\n</body></html>';
+}
+
+/** 同じ用紙を、アプリの中に貼り付けられる断片として作る（設定タブのプレビュー用） */
+function buildSurveySheetFragment(o) {
+  var opts = Object.assign({}, SHEET_DEFAULTS, o || {});
+  return '<style>' + sheetCss('.sheetdoc') + '</style>' + sheetsHtml(opts);
+}
+
+/* ==================================================================
+   §7 保存層（本体 src/db/db.js にあたる）
+
+   本体は Dexie（IndexedDB の薄いラッパー）を使っているが、ここでは
+   外部ライブラリを使えないので素の IndexedDB を直接触る。
+
+   保存先の選び方（上から順に試す）
+     1. IndexedDB … ふつうはこれ。写真も入る
+     2. localStorage … ファイル（file://）から開いた等で IndexedDB が使えないとき。
+        容量が小さい（おおむね5MB）ので、写真を多く入れると入りきらないことがある
+     3. どちらも使えないとき … 画面上でだけ動く（閉じると消える）。警告を出す
+
+   読み出しを速くするため、公園・樹木・設定は起動時にすべてメモリへ読み込み、
+   画面はメモリだけを見る。書き換えるときはメモリと保存先の両方を更新する。
+   写真は重いのでメモリに載せず、必要になったときだけ保存先から読む。
+
+   ※ 保存先の名前は本体（Dexieの 'kantantree'）とわざと変えてある。
+     同じ端末で本体と単一ファイル版を両方開いても、互いのデータを壊さないため。
+     データを行き来させたいときは 設定タブの JSON 書き出し／読み込みを使う。
+   ================================================================== */
+
+var DB_NAME = 'kantantree-standalone';
+var DB_VERSION = 1;
+var LS_PREFIX = 'kantantree-standalone:';
+
+/** 保存先。mode は 'idb' | 'local' | 'memory' */
+var store = { mode: 'memory', idb: null, error: '' };
+
+/** IndexedDB を開く。使えなければ null を返す（例外は投げない） */
+function openIdb() {
+  return new Promise(function (resolve) {
+    var idb = null;
+    try { idb = window.indexedDB; } catch (e) { idb = null; }
+    if (!idb) return resolve(null);
+    var req;
+    try { req = idb.open(DB_NAME, DB_VERSION); } catch (e) { return resolve(null); }
+    req.onupgradeneeded = function () {
+      var db = req.result;
+      if (!db.objectStoreNames.contains('parks')) db.createObjectStore('parks', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('trees')) {
+        db.createObjectStore('trees', { keyPath: 'id' }).createIndex('parkId', 'parkId');
+      }
+      if (!db.objectStoreNames.contains('photos')) {
+        db.createObjectStore('photos', { keyPath: 'id' }).createIndex('treeId', 'treeId');
+      }
+      if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'key' });
+    };
+    req.onsuccess = function () { resolve(req.result); };
+    req.onerror = function () { resolve(null); };
+    req.onblocked = function () { resolve(null); };
+    // 応答が返らない環境（プライベートモード等）で固まらないよう保険をかける
+    setTimeout(function () { resolve(req.readyState === 'done' ? req.result : null); }, 3000);
+  });
+}
+
+/** IndexedDB の1つのストアを全部読む */
+function idbGetAll(db, table) {
+  return new Promise(function (resolve, reject) {
+    var req = db.transaction(table, 'readonly').objectStore(table).getAll();
+    req.onsuccess = function () { resolve(req.result || []); };
+    req.onerror = function () { reject(req.error); };
+  });
+}
+
+/**
+ * 書き換えをまとめて実行する。IndexedDB では1つのトランザクションで行うので、
+ * 途中で失敗したら全部取り消される（公園のまるごと削除などで効く）。
+ *
+ * ops = { parks:{put:[],del:[]}, trees:{...}, settings:{...},
+ *         photos:{put:[], delByTree:[]} }
+ */
+function idbApply(db, ops) {
+  var tables = Object.keys(ops);
+  if (!tables.length) return Promise.resolve();
+  return new Promise(function (resolve, reject) {
+    var tx = db.transaction(tables, 'readwrite');
+    tx.oncomplete = function () { resolve(); };
+    tx.onerror = function () { reject(tx.error); };
+    tx.onabort = function () { reject(tx.error || new Error('保存を取り消しました')); };
+    tables.forEach(function (table) {
+      var os = tx.objectStore(table);
+      var op = ops[table] || {};
+      var putAll = function () { (op.put || []).forEach(function (rec) { os.put(rec); }); };
+      (op.del || []).forEach(function (key) { os.delete(key); });
+
+      // 写真の入れ替え（delByTree → put）。消してから入れる順を守る必要がある。
+      // 消す処理はカーソルを1件ずつ進めるので、先に put を出すと
+      // 入れたばかりの写真まで消してしまう（全部消し終えてから入れる）。
+      var waiting = (op.delByTree || []).length;
+      if (!waiting) { putAll(); return; }
+      (op.delByTree || []).forEach(function (treeId) {
+        var cur = os.index('treeId').openCursor(IDBKeyRange.only(treeId));
+        cur.onsuccess = function () {
+          var c = cur.result;
+          if (c) { c.delete(); c.continue(); return; }
+          waiting -= 1;
+          if (waiting === 0) putAll();
+        };
+      });
+    });
+  });
+}
+
+/** localStorage 版（IndexedDB が使えないときの控え） */
+var lsStore = {
+  read: function (key, fallback) {
+    try {
+      var raw = window.localStorage.getItem(LS_PREFIX + key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) { return fallback; }
+  },
+  write: function (key, value) {
+    window.localStorage.setItem(LS_PREFIX + key, JSON.stringify(value));
+  },
+  remove: function (key) {
+    try { window.localStorage.removeItem(LS_PREFIX + key); } catch (e) { /* 消せなくても続行 */ }
+  },
+};
+
+/** localStorage が読み書きできるか実際に試す */
+function localStorageWorks() {
+  try {
+    var probe = LS_PREFIX + 'probe';
+    window.localStorage.setItem(probe, '1');
+    window.localStorage.removeItem(probe);
+    return true;
+  } catch (e) { return false; }
+}
+
+// ------------------------------------------------------------------
+// メモリ上のデータ（画面はここだけを見る）
+// ------------------------------------------------------------------
+var mem = { parks: [], trees: [], settings: {} };
+
+/** 起動時に保存先を決めて、中身をメモリへ読み込む */
+function openStore() {
+  return openIdb().then(function (db) {
+    if (db) {
+      store.mode = 'idb';
+      store.idb = db;
+      return Promise.all([idbGetAll(db, 'parks'), idbGetAll(db, 'trees'), idbGetAll(db, 'settings')])
+        .then(function (res) {
+          mem.parks = res[0];
+          mem.trees = res[1];
+          mem.settings = {};
+          res[2].forEach(function (row) { mem.settings[row.key] = row.value; });
+        });
+    }
+    if (localStorageWorks()) {
+      store.mode = 'local';
+      store.error = 'この環境では IndexedDB が使えないため、簡易の保存先（localStorage）を使っています。' +
+        '容量が小さいので、写真を多く入れると保存できなくなることがあります。こまめにJSONバックアップを取ってください。';
+      mem.parks = lsStore.read('parks', []);
+      mem.trees = lsStore.read('trees', []);
+      mem.settings = lsStore.read('settings', {});
+      return null;
+    }
+    store.mode = 'memory';
+    store.error = 'この環境ではブラウザにデータを保存できません（IndexedDB・localStorage のどちらも使えません）。' +
+      '入力した内容は画面を閉じると消えます。作業のあとに必ずJSONで書き出してください。';
+    return null;
+  });
+}
+
+/**
+ * 書き換えを保存先へ反映する（メモリ側の更新は呼び出し側が済ませておく）。
+ * localStorage・メモリのときは配列ごと書き直す。
+ */
+function persist(ops) {
+  if (store.mode === 'idb') {
+    return idbApply(store.idb, ops).catch(function (err) {
+      showToast('保存に失敗しました: ' + (err && err.message ? err.message : err));
+      throw err;
+    });
+  }
+  if (store.mode === 'local') {
+    try {
+      if (ops.parks) lsStore.write('parks', mem.parks);
+      if (ops.trees) lsStore.write('trees', mem.trees);
+      if (ops.settings) lsStore.write('settings', mem.settings);
+      if (ops.photos) {
+        (ops.photos.delByTree || []).forEach(function (treeId) { lsStore.remove('photos:' + treeId); });
+        // 写真は樹木ごとに1つのキーへまとめる（全部を書き直さずに済むように）
+        var byTree = {};
+        (ops.photos.put || []).forEach(function (p) {
+          (byTree[p.treeId] = byTree[p.treeId] || []).push(p);
+        });
+        Object.keys(byTree).forEach(function (treeId) { lsStore.write('photos:' + treeId, byTree[treeId]); });
+      }
+    } catch (err) {
+      showToast('保存できませんでした（保存領域がいっぱいの可能性があります）。JSONで書き出して整理してください。');
+      return Promise.reject(err);
+    }
+  }
+  return Promise.resolve();
+}
+
+/** その樹木の写真（order順） */
+function getTreePhotos(treeId) {
+  if (store.mode === 'idb') {
+    return new Promise(function (resolve, reject) {
+      var req = store.idb.transaction('photos', 'readonly').objectStore('photos')
+        .index('treeId').getAll(IDBKeyRange.only(treeId));
+      req.onsuccess = function () {
+        resolve((req.result || []).sort(function (a, b) { return (a.order || 0) - (b.order || 0); }));
+      };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  if (store.mode === 'local') return Promise.resolve(lsStore.read('photos:' + treeId, []));
+  return Promise.resolve((mem.photos || {})[treeId] || []);
+}
+
+/** 全部の写真（フルバックアップ用） */
+function getAllPhotos() {
+  if (store.mode === 'idb') {
+    return idbGetAll(store.idb, 'photos');
+  }
+  return Promise.all(mem.trees.map(function (t) { return getTreePhotos(t.id); })).then(function (lists) {
+    return lists.reduce(function (all, list) { return all.concat(list); }, []);
+  });
+}
+
+/** UUID を作る（crypto.randomUUID が無い環境向けの控えも用意） */
+function uid() {
+  try {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+  } catch (e) { /* 使えなければ下の控えへ */ }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : ((r & 0x3) | 0x8)).toString(16);
+  });
+}
+
+function nowIso() { return new Date().toISOString(); }
+
+// ------------------------------------------------------------------
+// 設定（単一値）
+// ------------------------------------------------------------------
+
+function getSetting(key, fallback) {
+  return mem.settings[key] === undefined ? (fallback === undefined ? null : fallback) : mem.settings[key];
+}
+
+function setSetting(key, value) {
+  mem.settings[key] = value;
+  return persist({ settings: { put: [{ key: key, value: value }] } });
+}
+
+function getSpeciesMaster() { return getSetting('speciesMaster', []) || []; }
+function setSpeciesMaster(list) { return setSetting('speciesMaster', list); }
+function getSpeciesUsage() { return getSetting('speciesUsage', {}) || {}; }
+
+/**
+ * 樹種を使ったことを記録する。マスタに無ければ追加する。
+ * count: false のときは使用回数を増やさず、マスタへの登録だけ行う。
+ */
+function recordSpeciesUse(species, opts) {
+  if (!species) return Promise.resolve();
+  var count = !opts || opts.count !== false;
+  var master = getSpeciesMaster();
+  var jobs = [];
+  if (master.indexOf(species) < 0) jobs.push(setSpeciesMaster(master.concat([species])));
+  if (count) {
+    var usage = Object.assign({}, getSpeciesUsage());
+    usage[species] = (usage[species] || 0) + 1;
+    jobs.push(setSetting('speciesUsage', usage));
+  }
+  return Promise.all(jobs);
+}
+
+// ------------------------------------------------------------------
+// 公園
+// ------------------------------------------------------------------
+
+/** 次の公園コードを求める（既存コードの最大値+1） */
+function suggestParkCode() {
+  return nextParkCode(mem.parks.map(function (p) { return p.code; }));
+}
+
+/** 公園コードの重複チェック（selfId の公園は除く） */
+function isParkCodeTaken(code, selfId) {
+  return mem.parks.some(function (p) { return p.code === code && p.id !== selfId; });
+}
+
+function addPark(input) {
+  var t = nowIso();
+  var park = {
+    id: uid(),
+    code: String(input.code).trim(),
+    name: String(input.name).trim(),
+    lat: input.lat == null ? null : input.lat,
+    lng: input.lng == null ? null : input.lng,
+    note: input.note || '',
+    lastUsedAt: t,
+    createdAt: t,
+    updatedAt: t,
+  };
+  mem.parks.push(park);
+  return persist({ parks: { put: [park] } }).then(function () { return park; });
+}
+
+/**
+ * CSVから読んだ公園をまとめて登録する。
+ * 既にある公園（名前の正規化キーが一致）は飛ばす。公園コードは続きから自動採番。
+ */
+function importParks(rows) {
+  var codes = mem.parks.map(function (p) { return p.code; });
+  var pool = mem.parks.slice();
+  var toAdd = [];
+  var skippedNames = [];
+  var t = nowIso();
+  // 公園の並びは最終使用日時の降順。全部同じ日時にすると順序が不定になるので、
+  // CSVの行順がそのまま並び順になるよう1秒ずつずらす。
+  var base = Date.now();
+  var i = 0;
+
+  rows.forEach(function (row) {
+    var name = String(row.name == null ? '' : row.name).trim();
+    if (!name) return;
+    if (findParkByName(pool, name)) { skippedNames.push(name); return; }
+    var code = nextParkCode(codes);
+    codes.push(code);
+    var park = {
+      id: uid(),
+      code: code,
+      name: name,
+      lat: Number.isFinite(row.lat) ? row.lat : null,
+      lng: Number.isFinite(row.lng) ? row.lng : null,
+      note: '',
+      pid: row.pid || '', // 台帳メモ側が持っているID（あれば残しておく）
+      lastUsedAt: new Date(base - i * 1000).toISOString(),
+      createdAt: t,
+      updatedAt: t,
+    };
+    toAdd.push(park);
+    pool.push(park);
+    i += 1;
+  });
+
+  toAdd.forEach(function (p) { mem.parks.push(p); });
+  return persist({ parks: { put: toAdd } }).then(function () {
+    return { added: toAdd.length, skipped: skippedNames.length, skippedNames: skippedNames };
+  });
+}
+
+/**
+ * 公園を更新する。コードを変えたとき renumber=true なら、
+ * 配下の樹木の treeNo / parkCode も一括で書き換える。
+ */
+function updatePark(id, patch, opts) {
+  var renumber = Boolean(opts && opts.renumber);
+  var before = mem.parks.filter(function (p) { return p.id === id; })[0];
+  if (!before) return Promise.resolve();
+  var after = Object.assign({}, before, patch, { updatedAt: nowIso() });
+  mem.parks[mem.parks.indexOf(before)] = after;
+
+  var treePuts = [];
+  if (before.code !== after.code) {
+    mem.trees.forEach(function (tree, idx) {
+      if (tree.parkId !== id) return;
+      var updated = Object.assign({}, tree, {
+        parkCode: after.code,
+        treeNo: renumber ? renameTreeNoPrefix(tree.treeNo, before.code, after.code) : tree.treeNo,
+        updatedAt: nowIso(),
+      });
+      mem.trees[idx] = updated;
+      treePuts.push(updated);
+    });
+  }
+  var ops = { parks: { put: [after] } };
+  if (treePuts.length) ops.trees = { put: treePuts };
+  return persist(ops);
+}
+
+/** その公園に属する樹木・写真の件数（削除確認ダイアログ用） */
+function countParkContents(parkId) {
+  var trees = mem.trees.filter(function (t) { return t.parkId === parkId; });
+  var photoCount = trees.reduce(function (n, t) { return n + (t.photoCount || 0); }, 0);
+  return { treeCount: trees.length, photoCount: photoCount };
+}
+
+/** 公園をまるごと削除（配下の樹木・写真も。IndexedDBでは単一トランザクション） */
+function deleteParkCascade(parkId) {
+  var treeIds = mem.trees.filter(function (t) { return t.parkId === parkId; }).map(function (t) { return t.id; });
+  mem.trees = mem.trees.filter(function (t) { return t.parkId !== parkId; });
+  mem.parks = mem.parks.filter(function (p) { return p.id !== parkId; });
+  if (store.mode !== 'idb' && mem.photos) treeIds.forEach(function (id) { delete mem.photos[id]; });
+  return persist({
+    parks: { del: [parkId] },
+    trees: { del: treeIds },
+    photos: { delByTree: treeIds },
+  });
+}
+
+/** 公園を「最後に使った」印を付ける（一覧の並び順に使う） */
+function touchPark(parkId) {
+  if (!parkId) return Promise.resolve();
+  var park = mem.parks.filter(function (p) { return p.id === parkId; })[0];
+  if (!park) return Promise.resolve();
+  park.lastUsedAt = nowIso();
+  return persist({ parks: { put: [park] } });
+}
+
+// ------------------------------------------------------------------
+// 樹木
+// ------------------------------------------------------------------
+
+/** その公園の次の樹木番号（テープ番号を使わない場合の後方互換。ふだんは suggestTapeNo を使う） */
+function suggestTreeNo(parkId, parkCode) {
+  if (!parkId || !parkCode) return '';
+  return nextTreeNo(parkCode, mem.trees.filter(function (t) { return t.parkId === parkId; })
+    .map(function (t) { return t.treeNo; }));
+}
+
+/**
+ * 次のテープ番号。テープロールは公園をまたいで連続して使うので、公園で絞らない
+ * （樹木番号は公園ごとの採番、テープ番号は端末全体の採番、という違いがある）。
+ */
+function suggestTapeNo(roll) {
+  return nextTapeNo(mem.trees.map(function (t) { return t.tapeNo; }), roll);
+}
+
+/** 同一公園内の重複チェック（selfId の樹木は除く） */
+function isTreeNoTaken(parkId, treeNo, selfId) {
+  if (!parkId || !treeNo) return false;
+  return mem.trees.some(function (t) {
+    return t.parkId === parkId && t.treeNo === treeNo && t.id !== selfId;
+  });
+}
+
+/**
+ * 樹木を保存する（新規・更新の両方）。写真は dataUrl の配列で受け取り、
+ * 1本ぶんをまとめて入れ替える。一覧を軽くするため、1枚目の縮小版を
+ * tree.thumb として持たせる。
+ */
+function saveTree(tree, photoDataUrls) {
+  photoDataUrls = photoDataUrls || [];
+  var t = nowIso();
+  var record = Object.assign({}, tree, {
+    id: tree.id || uid(),
+    registeredAt: tree.registeredAt || t,
+    updatedAt: t,
+  });
+  // 重点観察区分は保存のたびに付け直す＝行と常に整合する
+  record.alertLevel = alertLevel(record);
+
+  var idx = mem.trees.findIndex(function (x) { return x.id === record.id; });
+  if (idx >= 0) mem.trees[idx] = record; else mem.trees.push(record);
+
+  var photos = photoDataUrls.map(function (dataUrl, i) {
+    return { id: uid(), treeId: record.id, dataUrl: dataUrl, order: i, takenAt: t };
+  });
+  if (store.mode === 'memory') {
+    mem.photos = mem.photos || {};
+    mem.photos[record.id] = photos;
+  }
+
+  var park = mem.parks.filter(function (p) { return p.id === record.parkId; })[0];
+  var ops = {
+    trees: { put: [record] },
+    photos: { delByTree: [record.id], put: photos },
+  };
+  if (park) {
+    park.lastUsedAt = t;
+    ops.parks = { put: [park] };
+  }
+  return persist(ops).then(function () { return record; });
+}
+
+/** 樹木を削除（写真も一緒に） */
+function deleteTrees(treeIds) {
+  if (!treeIds.length) return Promise.resolve();
+  mem.trees = mem.trees.filter(function (t) { return treeIds.indexOf(t.id) < 0; });
+  if (store.mode !== 'idb' && mem.photos) treeIds.forEach(function (id) { delete mem.photos[id]; });
+  return persist({ trees: { del: treeIds }, photos: { delByTree: treeIds } });
+}
+
+/** ストレージ使用量の概算（ブラウザが対応していれば） */
+function estimateStorage() {
+  if (!navigator.storage || !navigator.storage.estimate) return Promise.resolve(null);
+  return navigator.storage.estimate().then(function (res) {
+    return { usage: res.usage || 0, quota: res.quota || 0 };
+  }).catch(function () { return null; });
+}
+
+/* ==================================================================
+   §8 画面の下ごしらえ
+
+   本体は React で画面を組み立てているが、ここでは素のDOMで作る。
+   考え方は同じで、「状態（state）を書き換えたら、その画面をもう一度作り直す」。
+   文字入力の欄だけは、打つたびに作り直すと入力位置が飛ぶので、
+   state を書き換えるだけにして作り直さない。
+   ================================================================== */
+
+/**
+ * 要素を1つ作る。
+ * attrs: { class, text, html, value, onclick, oninput, disabled, ... }
+ *   'on' で始まるものはイベント（onclick → click）。
+ * children: 子要素（文字列・要素・null が混ざってよい）
+ */
+function el(tag, attrs, children) {
+  var node = document.createElement(tag);
+  attrs = attrs || {};
+  Object.keys(attrs).forEach(function (key) {
+    var v = attrs[key];
+    if (v == null || v === false) return;
+    if (key === 'class') node.className = v;
+    else if (key === 'text') node.textContent = v;
+    else if (key === 'html') node.innerHTML = v;
+    else if (key === 'value') node.value = v;
+    else if (key === 'checked' || key === 'disabled' || key === 'hidden' || key === 'multiple') node[key] = Boolean(v);
+    else if (key.slice(0, 2) === 'on') node.addEventListener(key.slice(2), v);
+    else node.setAttribute(key, v);
+  });
+  (children || []).forEach(function (child) {
+    if (child == null || child === false) return;
+    node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  });
+  return node;
+}
+
+/** ボタン（type="button" を付け忘れるとフォーム送信になるので必ずここを通す） */
+function button(label, cls, onClick, attrs) {
+  return el('button', Object.assign({ type: 'button', class: cls, text: label, onclick: onClick }, attrs || {}));
+}
+
+/** ラベル付きの入力欄。oninput は「値が変わるたび」に呼ばれる */
+function field(labelText, inputAttrs, opts) {
+  opts = opts || {};
+  return el('label', { class: 'field' + (opts.class ? ' ' + opts.class : '') }, [
+    el('span', { class: 'field-label', text: labelText }),
+    el(opts.tag || 'input', inputAttrs),
+  ]);
+}
+
+/**
+ * 紙のチェックシートで「〇を付ける」欄にあたる部品。
+ * もう一度押すと選択が外れる（間違えて押したときに戻せるように）。
+ *   multi: true のときは isOn(value) で入切を判定し、onChange には押した value を渡す
+ */
+function choiceRow(labelText, options, value, onChange, opts) {
+  opts = opts || {};
+  var buttons = options.map(function (opt) {
+    var on = opts.multi ? opts.isOn(opt.value) : value === opt.value;
+    return button(opt.label, 'choice' + (on ? ' choice-on' : ''), function () {
+      onChange(opts.multi ? opt.value : (on ? '' : opt.value));
+    }, { 'aria-pressed': on ? 'true' : 'false', title: opt.hint || null });
+  });
+  return el('div', { class: 'choice-row' }, [
+    el('span', { class: 'choice-label', text: labelText }),
+    el('div', { class: 'choice-opts' }, buttons),
+    opts.hint ? el('span', { class: 'choice-hint', text: opts.hint }) : null,
+  ]);
+}
+
+/** 数値のプリセット（樹高・樹冠幅）。押すと入り、もう一度押すと外れる */
+function presetRow(labelText, presets, value, onChange, hint, ariaLabel) {
+  var buttons = presets.map(function (m) {
+    var on = String(value) === String(m);
+    return button(String(m), 'choice' + (on ? ' choice-on' : ''), function () {
+      onChange(on ? '' : m);
+    }, { 'aria-pressed': on ? 'true' : 'false' });
+  });
+  var free = el('input', {
+    type: 'number', inputmode: 'decimal', step: '0.5', value: value === '' || value == null ? '' : value,
+    placeholder: '他', 'aria-label': ariaLabel,
+    oninput: function (e) { onChange(e.target.value, { silent: true }); },
+  });
+  return el('div', { class: 'choice-row' }, [
+    el('span', { class: 'choice-label', text: labelText }),
+    el('div', { class: 'choice-opts' }, buttons),
+    el('div', { class: 'height-free' }, [free, el('span', { class: 'choice-hint', text: hint })]),
+  ]);
+}
+
+/** 公園を最終使用日時の降順で並べる（よく使う公園が左に来る） */
+function sortedParks() {
+  return mem.parks.slice().sort(function (a, b) {
+    return String(b.lastUsedAt || '').localeCompare(String(a.lastUsedAt || ''));
+  });
+}
+
+function parkById(id) {
+  return mem.parks.filter(function (p) { return p.id === id; })[0] || null;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '/' + p(d.getMonth() + 1) + '/' + p(d.getDate());
+}
+
+// ------------------------------------------------------------------
+// 画面の状態
+// ------------------------------------------------------------------
+var state = {
+  tab: 'register',
+  currentParkId: null, // 登録タブで選んでいる公園
+  listParkId: null,    // 一覧の絞り込み（null=すべて）
+  editingTree: null,   // 編集中の樹木（null なら新規登録）
+  form: null,          // 登録フォームの入力内容（initForm で作る）
+  list: { query: '', selectMode: false, selected: [] },
+  settings: {
+    parkEditing: null,   // null=閉じている / {} =新規 / park =編集
+    parkForm: { code: '', name: '', note: '' },
+    parkError: '',
+    speciesText: '',
+    sheet: { parkId: '', surveyDate: '', surveyor: '', tapeRoll: '', rows: 14 },
+    sheetOpen: false,
+    storage: null,
+    lastBackupAt: null,
+  },
+};
+
+var rootEl = document.getElementById('root');
+var mainEl = null;
+var toastTimer = null;
+
+/** 画面下の吹き出し。2.6秒で消える */
+function showToast(message) {
+  var old = document.querySelector('.toast');
+  if (old) old.remove();
+  var node = el('div', { class: 'toast', text: message });
+  rootEl.appendChild(node);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(function () { node.remove(); }, 2600);
+}
+
+/** 今のタブの中身を作り直す。スクロール位置は保つ（作り直すと先頭へ戻るため） */
+function render() {
+  var top = mainEl ? mainEl.scrollTop : 0;
+  var pane;
+  if (state.tab === 'register') pane = renderRegisterPane();
+  else if (state.tab === 'list') pane = renderListPane();
+  else pane = renderSettingsPane();
+
+  mainEl.textContent = '';
+  mainEl.appendChild(pane);
+  mainEl.scrollTop = top;
+  renderTabbar();
+  renderAppbar();
+}
+
+var TABS = [
+  { key: 'register', label: '登録' },
+  { key: 'list', label: '一覧' },
+  { key: 'settings', label: '設定' },
+];
+
+function renderTabbar() {
+  var bar = document.querySelector('.tabbar');
+  bar.textContent = '';
+  TABS.forEach(function (t) {
+    bar.appendChild(button(t.label, 'tabbtn' + (state.tab === t.key ? ' tabbtn-on' : ''), function () {
+      if (t.key !== 'register' && state.editingTree) finishEdit();
+      state.tab = t.key;
+      if (mainEl) mainEl.scrollTop = 0;
+      render();
+    }));
+  });
+}
+
+function renderAppbar() {
+  var bar = document.querySelector('.appbar');
+  bar.textContent = '';
+  bar.appendChild(el('h1', {}, [
+    'かんたん樹木登録',
+    state.editingTree ? el('span', { class: 'appbar-sub', text: '編集中' }) : null,
+  ]));
+  bar.appendChild(el('span', {
+    class: 'appbar-note',
+    text: store.mode === 'idb' ? '端末内に保存' : (store.mode === 'local' ? '簡易保存' : '保存できません'),
+  }));
+}
+
+/* ==================================================================
+   §9 登録タブ（本体 src/components/RegisterForm ほか）
+   ここの摩擦をゼロにするのが最優先。並びは紙のチェックシートと同じ。
+   ================================================================== */
+
+var MAX_PHOTOS = 3;
+var TILE_LIMIT = 12;
+
+/** 使用回数の降順（同数ならマスタの並び順）で上位12件を返す */
+function orderSpecies(master, usage, limit) {
+  return master
+    .map(function (name, i) { return { name: name, count: usage[name] || 0, i: i }; })
+    .sort(function (a, b) { return b.count - a.count || a.i - b.i; })
+    .slice(0, limit || TILE_LIMIT)
+    .map(function (x) { return x.name; });
+}
+
+/** 新規登録用にフォームを作り直す（前回の樹種・調査情報は引き継ぐ） */
+function initForm() {
+  var last = getSetting('lastSurvey', null);
+  state.form = {
+    treeNo: '',
+    treeNoEdited: false,
+    tapeEdited: false,
+    species: getSetting('lastSpecies', '') || '',
+    photos: [],
+    girth: '',
+    note: '',
+    optionOpen: false,
+    saving: false,
+    otherOpen: false,   // 樹種の「その他（入力）」を開いているか
+    photoBusy: false,   // 写真を縮小している最中か
+    photoError: '',
+    inspection: emptyInspection(),
+    survey: Object.assign(emptySurvey(), last || {}),
+    surveyOpen: false,
+  };
+  applyTapeSuggestion();
+}
+
+/**
+ * 次のテープ番号と樹木番号を入れ直す。
+ * 手で直したあと（tapeEdited / treeNoEdited）は上書きしない。
+ */
+function applyTapeSuggestion() {
+  var form = state.form;
+  if (!form || state.editingTree || form.tapeEdited) return;
+  var park = parkById(state.currentParkId);
+  var tape = suggestTapeNo(form.survey.tapeRoll);
+  form.inspection.tapeNo = tape;
+  if (!form.treeNoEdited) form.treeNo = park ? treeNoFromTape(park.code, tape) : '';
+}
+
+/** 一覧から編集を開く */
+function openEdit(tree) {
+  state.editingTree = tree;
+  state.tab = 'register';
+  state.form = {
+    treeNo: tree.treeNo || '',
+    treeNoEdited: true,
+    tapeEdited: true,
+    species: tree.species || '',
+    photos: [],
+    girth: tree.girth == null ? '' : tree.girth,
+    note: tree.note || '',
+    optionOpen: Boolean(tree.girth || tree.note),
+    saving: false,
+    otherOpen: false,
+    photoBusy: false,
+    photoError: '',
+    inspection: pickInspection(tree),
+    survey: {
+      surveyDate: tree.surveyDate || '',
+      surveyor: tree.surveyor || '',
+      tapeRoll: tree.tapeRoll || '',
+    },
+    surveyOpen: false,
+  };
+  render();
+  // 写真は重いので後から読み込み、届いたら画面を作り直す
+  getTreePhotos(tree.id).then(function (rows) {
+    if (state.editingTree !== tree) return;
+    state.form.photos = rows.map(function (r) { return r.dataUrl; });
+    render();
+  });
+}
+
+/** 編集をやめて新規登録の状態に戻す */
+function finishEdit() {
+  state.editingTree = null;
+  initForm();
+}
+
+/** 登録タブの中身を作る */
+function renderRegisterPane() {
+  if (!state.form) initForm();
+  var form = state.form;
+  var isEdit = Boolean(state.editingTree);
+  var parkId = isEdit ? state.editingTree.parkId : state.currentParkId;
+  var park = parkById(parkId);
+
+  if (!mem.parks.length) {
+    return el('div', { class: 'pane' }, [
+      el('div', { class: 'empty' }, [
+        el('p', { text: '公園がまだ登録されていません。' }),
+        button('公園を登録する', 'btn btn-primary', function () {
+          state.tab = 'settings';
+          state.settings.parkEditing = {};
+          state.settings.parkForm = { code: suggestParkCode(), name: '', note: '' };
+          render();
+        }),
+      ]),
+    ]);
+  }
+
+  var pane = el('div', { class: 'pane pane-form' });
+
+  // --- 1. 公園（紙の「場所」） ---
+  if (!isEdit) {
+    pane.appendChild(el('section', { class: 'block' }, [
+      el('h3', { class: 'block-title', text: '公園' }),
+      el('div', { class: 'chips' }, sortedParks().map(function (p) {
+        return button(p.name, 'chip' + (p.id === parkId ? ' chip-on' : ''), function () {
+          state.currentParkId = p.id;
+          touchPark(p.id);
+          applyTapeSuggestion();
+          render();
+        });
+      })),
+    ]));
+  }
+
+  // --- 2. 調査情報（紙の表頭。折りたたみ） ---
+  pane.appendChild(renderSurveyInfo(form, park));
+
+  // --- 3. テープ番号・樹木番号 ---
+  var dupNode = el('p', { class: 'status status-error' });
+  var treeNoInput = el('input', {
+    class: 'treeno-input', type: 'text', value: form.treeNo, placeholder: 'P0010001',
+    oninput: function (e) {
+      form.treeNo = e.target.value;
+      form.treeNoEdited = true;
+      updateDup();
+    },
+  });
+  function updateDup() {
+    var taken = isTreeNoTaken(parkId, form.treeNo.trim(), isEdit ? state.editingTree.id : null);
+    dupNode.textContent = taken ? '同じ公園にこの番号がすでにあります。' : '';
+    dupNode.hidden = !taken; // 空のまま置くと余白だけが残るので隠す
+  }
+  var tapeInput = el('input', {
+    type: 'text', inputmode: 'numeric', value: form.inspection.tapeNo, placeholder: '0001',
+    oninput: function (e) {
+      form.inspection.tapeNo = e.target.value;
+      form.tapeEdited = true;
+      // 紙のシートの「樹木番号（公園コード+テープ番号）」に従って樹木番号も作り直す。
+      // 樹木番号を手で直したあとは上書きしない。
+      if (!isEdit && !form.treeNoEdited && park) {
+        var derived = treeNoFromTape(park.code, e.target.value);
+        if (derived) {
+          form.treeNo = derived;
+          treeNoInput.value = derived;
+        }
+      }
+      updateDup();
+    },
+  });
+  updateDup();
+
+  pane.appendChild(el('section', { class: 'block' }, [
+    el('h3', { class: 'block-title' }, [
+      'テープ番号・樹木番号 ',
+      isEdit ? null : el('span', { class: 'muted', text: '（次の番号。タップで編集）' }),
+    ]),
+    el('div', { class: 'field-row' }, [
+      el('label', { class: 'field field-tape' }, [
+        el('span', { class: 'field-label', text: 'テープ番号' }), tapeInput,
+      ]),
+      el('label', { class: 'field' }, [
+        el('span', { class: 'field-label', text: '樹木番号（公園コード＋テープ番号）' }), treeNoInput,
+      ]),
+    ]),
+    isEdit && park ? el('p', { class: 'hint', text: '公園: ' + park.name }) : null,
+    dupNode,
+  ]));
+
+  // --- 4. 樹種タイル ---
+  pane.appendChild(renderSpeciesTiles(form));
+
+  // --- 5. 点検内容 ---
+  pane.appendChild(renderInspectionFields(form));
+
+  // --- 6. 写真 ---
+  pane.appendChild(renderPhotoInput(form));
+
+  // 本体（React版）で入れた座標は、この版では編集できないが消さずに持ち続ける
+  if (isEdit && Number.isFinite(state.editingTree.lat)) {
+    pane.appendChild(el('section', { class: 'block' }, [
+      el('h3', { class: 'block-title', text: '座標' }),
+      el('p', { class: 'hint', text: state.editingTree.lat.toFixed(6) + ', ' + state.editingTree.lng.toFixed(6) +
+        ' — この版ではGPSを使わないため編集できません（保存しても消えません）。' }),
+    ]));
+  }
+
+  // --- 7. 任意項目（折りたたみ） ---
+  var optionBody = [];
+  if (form.optionOpen) {
+    optionBody.push(field('幹周 (cm)', {
+      type: 'number', inputmode: 'decimal', step: '1', value: form.girth,
+      oninput: function (e) { form.girth = e.target.value; },
+    }));
+    optionBody.push(field('メモ', {
+      rows: 3, value: form.note,
+      oninput: function (e) { form.note = e.target.value; },
+    }, { tag: 'textarea' }));
+  }
+  pane.appendChild(el('section', { class: 'block' }, [
+    button((form.optionOpen ? '▼' : '▶') + ' 任意項目（幹周・メモ）', 'disclosure', function () {
+      form.optionOpen = !form.optionOpen;
+      render();
+    }),
+  ].concat(optionBody)));
+
+  // --- 8. 固定フッターの大きな［登録］ボタン ---
+  var saveBtn = button(form.saving ? '保存中…' : (isEdit ? '更新' : '登録'), 'btn btn-primary btn-big',
+    function () { handleSave(park); }, { disabled: form.saving || !park });
+  pane.appendChild(el('div', { class: 'form-foot' }, [
+    isEdit ? button('キャンセル', 'btn btn-ghost btn-big', function () { finishEdit(); render(); }) : null,
+    saveBtn,
+  ]));
+
+  return pane;
+}
+
+/** 調査情報（紙のチェックシートの表頭）。1枚のシートで共通なので登録のたびに引き継ぐ */
+function renderSurveyInfo(form, park) {
+  var v = form.survey;
+  var summary = [
+    park ? park.name : '公園未選択',
+    v.surveyDate || '調査日なし',
+    v.surveyor || '調査者なし',
+    v.tapeRoll ? 'ロール' + v.tapeRoll : '',
+  ].filter(Boolean).join(' / ');
+
+  var body = [];
+  if (form.surveyOpen) {
+    body.push(el('p', { class: 'hint', text:
+      '1枚のチェックシートで共通の項目です。登録のたびに引き継ぎます。場所は上で選んでいる公園（' +
+      (park ? park.name : '未選択') + '）を使います。' }));
+    body.push(el('div', { class: 'field-row' }, [
+      field('調査日', {
+        type: 'date', value: v.surveyDate,
+        oninput: function (e) { v.surveyDate = e.target.value; },
+      }),
+      field('調査者', {
+        type: 'text', value: v.surveyor, placeholder: '例 橘川',
+        oninput: function (e) { v.surveyor = e.target.value; },
+      }),
+    ]));
+    body.push(choiceRow('テープロール', TAPE_ROLLS.map(function (c) { return { value: c, label: c }; }),
+      v.tapeRoll, function (next) {
+        v.tapeRoll = next;
+        // ロールが変わったら、そのロールの続きの番号を出し直す
+        applyTapeSuggestion();
+        render();
+      }));
+  }
+
+  // 見出しボタンの中に要約（場所 / 調査日 / 調査者 / ロール）を入れる
+  var head = el('button', { type: 'button', class: 'disclosure', onclick: function () {
+    form.surveyOpen = !form.surveyOpen;
+    render();
+  } }, [
+    (form.surveyOpen ? '▼' : '▶') + ' 調査情報',
+    form.surveyOpen ? null : el('span', { class: 'muted survey-summary', text: summary }),
+  ]);
+  return el('section', { class: 'block' }, [head].concat(body));
+}
+
+/** 樹種タイル。よく使う樹種を12枚まで、使用回数の降順で並べる */
+function renderSpeciesTiles(form) {
+  var master = getSpeciesMaster();
+  var usage = getSpeciesUsage();
+  var tiles = orderSpecies(master, usage);
+  // 選択中の樹種が上位12件に入っていないときは、見失わないよう先頭に足す
+  var shown = form.species && form.species !== '不明' && tiles.indexOf(form.species) < 0
+    ? [form.species].concat(tiles)
+    : tiles;
+
+  var otherInput = null;
+  var commitOther = function () {
+    var name = otherInput.value.trim();
+    if (!name) return;
+    form.species = name;
+    form.otherOpen = false;
+    render();
+  };
+
+  var body = [
+    el('h3', { class: 'block-title', text: '樹種' }),
+    el('div', { class: 'tiles' }, shown.map(function (name) {
+      return button(name, 'tile' + (form.species === name ? ' tile-on' : ''), function () {
+        form.species = name;
+        render();
+      });
+    }).concat([
+      button('その他（入力）', 'tile tile-sub' + (form.otherOpen ? ' tile-on' : ''), function () {
+        form.otherOpen = !form.otherOpen;
+        render();
+      }),
+      button('不明', 'tile tile-sub' + (form.species === '不明' ? ' tile-on' : ''), function () {
+        form.species = '不明';
+        render();
+      }),
+    ])),
+  ];
+
+  if (form.otherOpen) {
+    otherInput = el('input', {
+      type: 'text', placeholder: '樹種名を入力（例 クスノキ）',
+      onkeydown: function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commitOther(); }
+      },
+    });
+    body.push(el('div', { class: 'link-row' }, [otherInput, button('決定', 'btn btn-ghost', commitOther)]));
+    setTimeout(function () { otherInput.focus(); }, 0);
+  } else if (!shown.length) {
+    body.push(el('p', { class: 'hint', text:
+      'まだ樹種がありません。「その他（入力）」から入れると、次から樹種タイルに並びます。' }));
+  }
+
+  return el('section', { class: 'block' }, body);
+}
+
+/** 点検内容（紙の「樹木点検 現地チェックシート」1ページ目の各行の項目） */
+function renderInspectionFields(form) {
+  var v = form.inspection;
+  var set = function (key, next) { v[key] = next; render(); };
+  // 値だけ書き換えて画面は作り直さない（文字入力の途中で入力位置が飛ばないように）
+  var setQuiet = function (key, next) { v[key] = next; };
+
+  var body = [el('h3', { class: 'block-title', text: '点検内容' })];
+
+  // 樹高・樹冠幅。現場では測らないので、よく使う値を押すだけで入る
+  body.push(presetRow('樹高 (m)', HEIGHT_PRESETS, v.height, function (next, opts) {
+    if (opts && opts.silent) setQuiet('height', next); else set('height', next);
+  }, 'm — 上に無い高さはここへ。目分量でよい（巻尺は使わない）', '樹高（自由入力）'));
+
+  body.push(presetRow('樹冠幅 (m)', CROWN_WIDTH_PRESETS, v.crownWidth, function (next, opts) {
+    if (opts && opts.silent) setQuiet('crownWidth', next); else set('crownWidth', next);
+  }, 'm — 枝の広がりの差し渡し。任意（入れなくてよい）', '樹冠幅（自由入力）'));
+
+  body.push(choiceRow('区分', VEG_CLASS, v.vegClass, function (next) { set('vegClass', next); },
+    { hint: '高木=おおむね3m以上 / 中木=1.5〜3m / 低木=1.5m未満。任意' }));
+
+  body.push(choiceRow('葉の茂り', LEAF_DENSITY, v.leafDensity, function (next) { set('leafDensity', next); },
+    { hint: '濃=枝先まで密 / 普=ふつう / ま=まばら（空が透ける）/ ほ=ほとんどない　※迷ったら「普」' }));
+
+  body.push(choiceRow('キノコ', FUNGUS, v.fungus, function (next) {
+    // 「無」「未」に変えたら部位は消す（紙でも部位は書かないため）
+    v.fungus = next;
+    if (next !== '有') v.fungusPart = '';
+    render();
+  }, { hint: '無=見たが無かった / 未=見ていない・見えない　※必ず区別する。キノコの大小・有無は腐朽の程度の目安にはならない（小さくても・無くても内部が腐朽していることがある）ので、あれば大小に関わらず記録する' }));
+
+  if (v.fungus === '有') {
+    body.push(choiceRow('キノコ部位', FUNGUS_PART, null, function (code) {
+      set('fungusPart', togglePart(v.fungusPart, code, FUNGUS_PART));
+    }, {
+      multi: true,
+      isOn: function (code) { return hasPart(v.fungusPart, code, FUNGUS_PART); },
+      hint: '複数選べます（根=根元 / 幹=生きた幹 / 枝=枝の付け根 / 枯=枯枝・枯幹 / 不=不明）',
+    }));
+  }
+
+  body.push(choiceRow('空洞・傷', CAVITY, v.cavity, function (next) {
+    // 「無」に変えたら位置は消す（キノコ部位と同じ考え方）
+    v.cavity = next;
+    if (next !== '有') v.cavityPart = '';
+    render();
+  }, { hint: '穴（空洞）・樹皮の広範囲な剥離。大きさの基準はなし。気になったら「有」　※割れ目・裂けは下の「樹幹の亀裂」へ' }));
+
+  if (v.cavity === '有') {
+    body.push(choiceRow('空洞・傷の位置', CAVITY_PART, null, function (code) {
+      set('cavityPart', togglePart(v.cavityPart, code, CAVITY_PART));
+    }, {
+      multi: true,
+      isOn: function (code) { return hasPart(v.cavityPart, code, CAVITY_PART); },
+      hint: '複数選べます',
+    }));
+  }
+
+  // 国交省 主要項目: 樹幹の揺らぎ → 不自然な傾斜 → 亀裂
+  body.push(choiceRow('樹幹の揺らぎ', TRUNK_SWAY, v.trunkSway, function (next) { set('trunkSway', next); },
+    { hint: '幹を押すと根鉢ごと動く・地際が浮く（倒木直前のサイン）' }));
+  body.push(choiceRow('樹幹の不自然な傾斜', TRUNK_LEAN, v.trunkLean, function (next) { set('trunkLean', next); },
+    { hint: '近年傾いた・根元が持ち上がる等の不自然な傾き' }));
+  body.push(choiceRow('樹幹の亀裂', TRUNK_CRACK, v.trunkCrack, function (next) { set('trunkCrack', next); },
+    { hint: '幹の割れ目・裂け・縦の亀裂。気になったら「有」' }));
+  body.push(choiceRow('結合部の異常（入り皮）', BARK_INCLUSION, v.barkInclusion, function (next) { set('barkInclusion', next); },
+    { hint: '二又や枝の付け根の合わせ目に樹皮が巻き込まれている（裂けやすい）' }));
+  body.push(choiceRow('フラス', FRASS, v.frass, function (next) { set('frass', next); },
+    { hint: '木くずとフンが混ざったうどん状・かりんとう状の排出物。サクラ・ウメ・モモを重点確認' }));
+
+  // 活力度（国交省）。段階は 1＝良い 〜 4
+  body.push(choiceRow('活力度・樹勢', VIGOR, v.vigor, function (next) { set('vigor', next); },
+    { hint: '1=良い / 2=少し悪い / 3=悪い / 4=枯死（ナラ枯れ・マツ枯れ等）' }));
+  body.push(choiceRow('活力度・樹形', TREE_FORM, v.treeForm, function (next) { set('treeForm', next); },
+    { hint: '1=望ましい樹形 / 2=乱れがある / 3=著しく乱れ回復困難 / 4=完全に崩壊' }));
+
+  // 周辺環境。倒れたときに何にかかるかの目安
+  var envAllNone = ENV_ITEMS.every(function (item) { return v[item.key] === '無'; });
+  var envBody = [
+    el('div', { class: 'env-head' }, [
+      el('span', { class: 'choice-label', text: '周辺環境' }),
+      button('すべて無', 'btn btn-ghost btn-small' + (envAllNone ? ' btn-on' : ''), function () {
+        ENV_ITEMS.forEach(function (item) { v[item.key] = '無'; });
+        render();
+      }),
+    ]),
+  ];
+  ENV_ITEMS.forEach(function (item) {
+    envBody.push(choiceRow(item.label, ENV_PRESENCE, v[item.key], function (next) { set(item.key, next); }));
+  });
+  envBody.push(field('周辺環境の備考', {
+    type: 'text', value: v.envNote, placeholder: '例 園路に張り出し（自由記入）',
+    oninput: function (e) { setQuiet('envNote', e.target.value); },
+  }));
+  body.push(el('div', { class: 'env-block' }, envBody));
+
+  body.push(field('注意', {
+    type: 'text', value: v.caution, placeholder: '気になった木に印（自由記入）',
+    oninput: function (e) { setQuiet('caution', e.target.value); },
+  }));
+
+  // 紙の運用ルール4「見つけたらすぐ連絡すること」。その場で気づけるよう出す
+  urgentNotes(v).forEach(function (note) {
+    body.push(el('p', { class: 'status status-error', text: '⚠ ' + note }));
+  });
+
+  return el('section', { class: 'block' }, body);
+}
+
+/** 写真（撮影・アルバムから選択）。保存前に長辺1280 / 品質0.7へ縮小する */
+function renderPhotoInput(form) {
+  var handleFiles = function (e) {
+    var files = Array.prototype.slice.call(e.target.files || []);
+    e.target.value = ''; // 同じ写真をもう一度選べるようにする
+    if (!files.length) return;
+    var room = MAX_PHOTOS - form.photos.length;
+    var targets = files.slice(0, room);
+    form.photoBusy = true;
+    render();
+    Promise.all(targets.map(resizePhoto)).then(function (added) {
+      form.photos = form.photos.concat(added);
+      form.photoError = files.length > room ? '写真は' + MAX_PHOTOS + '枚までです。' : '';
+    }).catch(function (err) {
+      form.photoError = err && err.message ? err.message : '写真を読み込めませんでした。';
+    }).then(function () {
+      form.photoBusy = false;
+      render();
+    });
+  };
+
+  var camera = el('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: handleFiles });
+  var album = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, onchange: handleFiles });
+  var full = form.photos.length >= MAX_PHOTOS;
+
+  var body = [
+    el('h3', { class: 'block-title' }, [
+      '写真 ', el('span', { class: 'muted', text: '（' + form.photos.length + '/' + MAX_PHOTOS + '）' }),
+    ]),
+    camera,
+    album,
+    el('div', { class: 'btn-row' }, [
+      button(form.photoBusy ? '処理中…' : '📷 撮影', 'btn', function () { camera.click(); },
+        { disabled: form.photoBusy || full }),
+      button('🖼 アルバムから', 'btn btn-ghost', function () { album.click(); },
+        { disabled: form.photoBusy || full }),
+    ]),
+  ];
+
+  if (form.photos.length) {
+    body.push(el('div', { class: 'thumbs' }, form.photos.map(function (src, i) {
+      return el('button', { type: 'button', class: 'thumb', title: 'タップで削除', onclick: function () {
+        form.photos.splice(i, 1);
+        render();
+      } }, [
+        el('img', { src: src, alt: '写真' + (i + 1) }),
+        el('span', { class: 'thumb-x', text: '×' }),
+      ]);
+    })));
+    body.push(el('p', { class: 'hint', text: 'サムネイルをタップすると削除します。' }));
+  }
+  if (form.photoError) body.push(el('p', { class: 'status status-error', text: form.photoError }));
+
+  return el('section', { class: 'block' }, body);
+}
+
+/** 登録・更新 */
+function handleSave(park) {
+  var form = state.form;
+  var isEdit = Boolean(state.editingTree);
+  if (!park) return;
+  if (!form.treeNo.trim()) {
+    showToast('樹木番号を入れてください。');
+    return;
+  }
+  if (isTreeNoTaken(park.id, form.treeNo.trim(), isEdit ? state.editingTree.id : null)) {
+    var ok = window.confirm(form.treeNo + ' は同じ公園にすでにあります。\n' +
+      'このまま登録しますか？（一覧に「重複」バッジが付きます）');
+    if (!ok) return;
+  }
+
+  form.saving = true;
+  render();
+
+  var v = form.inspection;
+  var num = function (x) { return x === '' || x == null ? null : Number(x); };
+
+  (form.photos.length ? makeThumb(form.photos[0]) : Promise.resolve(null)).then(function (thumb) {
+    var record = Object.assign({}, state.editingTree || {}, {
+      id: isEdit ? state.editingTree.id : undefined,
+      parkId: park.id,
+      parkCode: park.code,
+      treeNo: form.treeNo.trim(),
+      species: form.species || '不明',
+      girth: num(form.girth),
+      note: form.note.trim(),
+      thumb: thumb,
+      // 点検内容（紙のチェックシート1ページ目）
+      tapeNo: v.tapeNo.trim(),
+      height: num(v.height),
+      crownWidth: num(v.crownWidth),
+      vegClass: v.vegClass,
+      leafDensity: v.leafDensity,
+      fungus: v.fungus,
+      fungusPart: v.fungusPart,
+      cavity: v.cavity,
+      cavityPart: v.cavityPart,
+      trunkSway: v.trunkSway,
+      trunkLean: v.trunkLean,
+      trunkCrack: v.trunkCrack,
+      barkInclusion: v.barkInclusion,
+      frass: v.frass,
+      vigor: v.vigor,
+      treeForm: v.treeForm,
+      envRoad: v.envRoad,
+      envWire: v.envWire,
+      envBuilding: v.envBuilding,
+      envNote: v.envNote.trim(),
+      caution: v.caution.trim(),
+      photoCount: form.photos.length, // 紙の「写真」欄にあたる
+      // 調査情報（表頭）
+      surveyDate: form.survey.surveyDate,
+      surveyor: form.survey.surveyor.trim(),
+      tapeRoll: form.survey.tapeRoll,
+    });
+    // 座標はこの版では入力しないが、本体で入れた値は消さずに引き継ぐ
+    return saveTree(record, form.photos);
+  }).then(function (saved) {
+    // 使用回数は新規登録のときだけ増やす（編集のたびに増えると並び順が実態とずれる）
+    return recordSpeciesUse(saved.species, { count: !isEdit }).then(function () {
+      return Promise.all([
+        setSetting('lastSpecies', saved.species),
+        setSetting('lastSurvey', {
+          surveyDate: form.survey.surveyDate,
+          surveyor: form.survey.surveyor.trim(),
+          tapeRoll: form.survey.tapeRoll,
+        }),
+      ]);
+    }).then(function () { return saved; });
+  }).then(function (saved) {
+    if (isEdit) {
+      showToast(saved.treeNo + ' を更新しました');
+      finishEdit();
+    } else {
+      showToast(saved.treeNo + ' を登録しました');
+      // 公園・樹種・調査情報は保持。写真・任意項目・点検内容はクリアして番号を +1 する
+      var keep = { species: form.species, survey: form.survey };
+      initForm();
+      state.form.species = keep.species;
+      state.form.survey = keep.survey;
+      applyTapeSuggestion();
+    }
+    render();
+  }).catch(function (err) {
+    state.form.saving = false;
+    showToast('保存に失敗しました: ' + (err && err.message ? err.message : err));
+    render();
+  });
+}
+
+/* ==================================================================
+   §10 一覧タブ（本体 src/components/TreeList）
+   公園タブで絞り込み、検索、タップで編集、選択して一括削除。
+   ================================================================== */
+
+/** 公園タブ（横スクロール）。最終使用日時の降順で並べる */
+function renderParkTabs(currentId, onSelect, allowAll) {
+  var tabs = [];
+  if (allowAll) {
+    tabs.push(button('すべて', 'parktab' + (!currentId ? ' parktab-on' : ''), function () { onSelect(null); }));
+  }
+  sortedParks().forEach(function (p) {
+    tabs.push(button(p.name, 'parktab' + (p.id === currentId ? ' parktab-on' : ''), function () { onSelect(p.id); }));
+  });
+  return el('div', { class: 'parktabs' }, tabs);
+}
+
+function renderListPane() {
+  var pane = el('div', { class: 'pane' });
+  var list = state.list;
+
+  pane.appendChild(renderParkTabs(state.listParkId, function (id) {
+    state.listParkId = id;
+    render();
+  }, true));
+
+  var cardsWrap = el('div', {});
+
+  pane.appendChild(el('div', { class: 'list-tools' }, [
+    el('input', {
+      type: 'search', value: list.query, placeholder: '樹木番号・樹種・メモを検索',
+      oninput: function (e) {
+        // 打つたびに画面全部を作り直すと入力位置が飛ぶので、カードの所だけ入れ替える
+        list.query = e.target.value;
+        fillCards(cardsWrap);
+      },
+    }),
+    button(list.selectMode ? 'やめる' : '選択', 'btn btn-ghost', function () {
+      list.selectMode = !list.selectMode;
+      list.selected = [];
+      render();
+    }),
+  ]));
+
+  if (list.selectMode) {
+    pane.appendChild(el('div', { class: 'select-bar' }, [
+      el('span', { text: list.selected.length + ' 件を選択中' }),
+      button('削除', 'btn btn-danger', handleBulkDelete, { disabled: !list.selected.length }),
+    ]));
+  }
+
+  fillCards(cardsWrap);
+  pane.appendChild(cardsWrap);
+  return pane;
+}
+
+/** 絞り込み・検索の結果（樹木番号の昇順） */
+function shownTrees() {
+  var list = state.list;
+  var base = state.listParkId
+    ? mem.trees.filter(function (t) { return t.parkId === state.listParkId; })
+    : mem.trees.slice();
+  var q = list.query.trim().toLowerCase();
+  var filtered = q
+    ? base.filter(function (t) {
+        return [t.treeNo, t.species, t.note, t.caution].some(function (v) {
+          return String(v == null ? '' : v).toLowerCase().indexOf(q) >= 0;
+        });
+      })
+    : base;
+  return filtered.sort(function (a, b) {
+    return String(a.treeNo || '').localeCompare(String(b.treeNo || ''), 'ja', { numeric: true });
+  });
+}
+
+/** カードの一覧を入れ替える */
+function fillCards(wrap) {
+  var list = state.list;
+  var trees = shownTrees();
+  wrap.textContent = '';
+
+  if (!trees.length) {
+    wrap.appendChild(el('p', { class: 'muted pad',
+      text: list.query ? '見つかりませんでした。' : 'まだ登録がありません。' }));
+    return;
+  }
+
+  // 同一公園内で重複している番号を洗い出す（重複バッジ用）
+  var seen = {};
+  mem.trees.forEach(function (t) {
+    var key = t.parkId + '|' + t.treeNo;
+    seen[key] = (seen[key] || 0) + 1;
+  });
+
+  var parkNameById = {};
+  mem.parks.forEach(function (p) { parkNameById[p.id] = p.name; });
+
+  wrap.appendChild(el('ul', { class: 'cards' }, trees.map(function (t) {
+    var isDup = seen[t.parkId + '|' + t.treeNo] > 1;
+    var picked = list.selected.indexOf(t.id) >= 0;
+    var meta = [];
+    if (!state.listParkId) meta.push(el('span', { class: 'badge', text: parkNameById[t.parkId] || '-' }));
+    // 点検で「有」だったものは現場で拾いたいので目立たせる
+    inspectionBadges(t).forEach(function (label) {
+      meta.push(el('span', { class: 'badge badge-alert', text: label }));
+    });
+    if (isDup) meta.push(el('span', { class: 'badge badge-warn', text: '重複' }));
+    meta.push(el('span', { class: 'muted', text: fmtDate(t.registeredAt) }));
+
+    var card = el('button', {
+      type: 'button',
+      class: 'card' + (list.selectMode && picked ? ' card-on' : ''),
+      onclick: function () {
+        if (!list.selectMode) { openEdit(t); return; }
+        var at = list.selected.indexOf(t.id);
+        if (at >= 0) list.selected.splice(at, 1); else list.selected.push(t.id);
+        render();
+      },
+    }, [
+      list.selectMode ? el('span', { class: 'checkbox' + (picked ? ' checkbox-on' : '') }) : null,
+      el('span', { class: 'card-thumb' }, [
+        t.thumb ? el('img', { src: t.thumb, alt: '' }) : el('span', { class: 'no-photo', text: '写真なし' }),
+      ]),
+      el('span', { class: 'card-body' }, [
+        el('span', { class: 'card-title', text: t.treeNo }),
+        el('span', { class: 'card-species' }, [
+          t.species || '',
+          t.leafDensity ? el('span', { class: 'muted', text: '　葉 ' + leafDensityLabel(t.leafDensity) }) : null,
+        ]),
+        el('span', { class: 'card-meta' }, meta),
+      ]),
+    ]);
+    return el('li', {}, [card]);
+  })));
+}
+
+function handleBulkDelete() {
+  var ids = state.list.selected.slice();
+  if (!ids.length) return;
+  if (!window.confirm('選択した ' + ids.length + ' 件を削除します。写真も消えます。よろしいですか？')) return;
+  deleteTrees(ids).then(function () {
+    state.list.selected = [];
+    state.list.selectMode = false;
+    showToast(ids.length + ' 件を削除しました');
+    render();
+  });
+}
+
+/* ==================================================================
+   §11 設定タブ（本体 src/components/Settings）
+     - 保存先の状態
+     - 公園の管理（追加・編集・削除・CSV取込）
+     - 樹種マスタの管理
+     - 紙の調査票（印刷）
+     - バックアップ・書き出し
+   ================================================================== */
+
+function renderSettingsPane() {
+  var pane = el('div', { class: 'pane' });
+  if (store.error) {
+    pane.appendChild(el('section', { class: 'block' }, [
+      el('h3', { class: 'block-title', text: '保存先について' }),
+      el('p', { class: 'status status-error', text: store.error }),
+    ]));
+  }
+  pane.appendChild(renderParkManager());
+  pane.appendChild(renderSpeciesManager());
+  pane.appendChild(renderPrintSheetPanel());
+  pane.appendChild(renderBackupPanel());
+  return pane;
+}
+
+// ------------------------------------------------------------------
+// 公園の管理
+// ------------------------------------------------------------------
+function renderParkManager() {
+  var st = state.settings;
+  var body = [el('h3', { class: 'block-title', text: '公園' })];
+
+  if (!mem.parks.length) body.push(el('p', { class: 'muted', text: 'まだ公園がありません。' }));
+
+  body.push(el('ul', { class: 'rows' }, sortedParks().map(function (p) {
+    return el('li', { class: 'row' }, [
+      el('span', { class: 'row-main' }, [
+        el('strong', { text: p.name }),
+        el('span', { class: 'muted', text: p.code + (p.note ? ' / ' + p.note : '') }),
+      ]),
+      el('span', { class: 'row-actions' }, [
+        button('編集', 'btn btn-ghost', function () {
+          st.parkEditing = p;
+          st.parkForm = { code: p.code, name: p.name, note: p.note || '' };
+          st.parkError = '';
+          render();
+        }),
+        button('削除', 'btn btn-danger', function () { handleParkDelete(p); }),
+      ]),
+    ]);
+  })));
+
+  if (!st.parkEditing) {
+    var csvInput = el('input', {
+      type: 'file', accept: '.csv,text/csv', hidden: true,
+      onchange: function (e) { handleParkCsv(e); },
+    });
+    body.push(el('div', { class: 'btn-row' }, [
+      button('＋ 公園を追加', 'btn btn-primary', function () {
+        st.parkEditing = {};
+        st.parkForm = { code: suggestParkCode(), name: '', note: '' };
+        st.parkError = '';
+        render();
+      }),
+      csvInput,
+      button(st.csvBusy ? '読み込み中…' : '📤 CSVから取り込む', 'btn', function () { csvInput.click(); },
+        { disabled: Boolean(st.csvBusy) }),
+    ]));
+    body.push(el('p', { class: 'hint', text:
+      'CSVの見出しに「' + NAME_HEADERS.join(' / ') + '」のいずれかがあれば公園名として読み取ります。' +
+      '文字コードは UTF-8 と Shift_JIS のどちらでも構いません（樹木台帳メモと同じ形式です）。' }));
+  } else {
+    var f = st.parkForm;
+    var sub = [
+      field('公園名', {
+        type: 'text', value: f.name, placeholder: '例 皇子が丘公園',
+        oninput: function (e) { f.name = e.target.value; },
+      }),
+      field('公園コード（樹木番号の頭に付く。半角英数とハイフン）', {
+        type: 'text', value: f.code, placeholder: 'P001',
+        oninput: function (e) { f.code = e.target.value; },
+      }),
+      field('メモ（任意）', {
+        type: 'text', value: f.note,
+        oninput: function (e) { f.note = e.target.value; },
+      }),
+    ];
+    if (st.parkError) sub.push(el('p', { class: 'status status-error', text: st.parkError }));
+    sub.push(el('div', { class: 'btn-row' }, [
+      button('キャンセル', 'btn btn-ghost', function () {
+        st.parkEditing = null;
+        st.parkError = '';
+        render();
+      }),
+      button(st.parkEditing.id ? '更新' : '登録', 'btn btn-primary', handleParkSave),
+    ]));
+    body.push(el('div', { class: 'subform' }, sub));
+  }
+
+  return el('section', { class: 'block' }, body);
+}
+
+function handleParkSave() {
+  var st = state.settings;
+  var code = st.parkForm.code.trim();
+  var name = st.parkForm.name.trim();
+  var selfId = st.parkEditing.id || null;
+
+  if (!name) { st.parkError = '公園名を入れてください。'; render(); return; }
+  if (!isValidParkCode(code)) {
+    st.parkError = '公園コードは半角英数とハイフンだけが使えます。';
+    render();
+    return;
+  }
+  if (isParkCodeTaken(code, selfId)) {
+    st.parkError = '公園コード ' + code + ' はすでに使われています。';
+    render();
+    return;
+  }
+
+  // 公園名の表記ゆれ照合（樹木台帳メモ由来）。
+  // 「皇子が丘公園」と「皇子ヶ丘公園」のような二重登録を止める。
+  var same = findParkByName(mem.parks, name, selfId);
+  if (same) {
+    st.parkError = '「' + same.name + '」（' + same.code + '）と同じ公園に見えます。' +
+      '別名で登録するか、既存の公園を編集してください。';
+    render();
+    return;
+  }
+  if (!selfId) {
+    var cands = parkCandidates(mem.parks, name);
+    if (cands.length) {
+      var ok = window.confirm('「' + name + '」は既存の公園と名前が似ています。\n' +
+        '　近い公園: ' + cands.join(' / ') + '\n\n別の公園として新しく登録しますか？');
+      if (!ok) return;
+    }
+  }
+
+  var done = function (message) {
+    st.parkEditing = null;
+    st.parkError = '';
+    showToast(message);
+    render();
+  };
+
+  if (!selfId) {
+    addPark({ code: code, name: name, note: st.parkForm.note }).then(function (park) {
+      // 最初の1つ目なら、そのまま登録タブで使えるように選んでおく
+      if (!state.currentParkId) {
+        state.currentParkId = park.id;
+        if (state.form) applyTapeSuggestion();
+      }
+      done(name + ' を登録しました');
+    });
+    return;
+  }
+
+  var renumber = false;
+  if (st.parkEditing.code !== code) {
+    var counts = countParkContents(selfId);
+    if (counts.treeCount > 0) {
+      renumber = window.confirm('公園コードを ' + st.parkEditing.code + ' → ' + code + ' に変えます。\n' +
+        'この公園の樹木 ' + counts.treeCount + '件 の樹木番号も書き換えますか？\n\n' +
+        'OK: 書き換える（例 ' + st.parkEditing.code + '0001 → ' + code + '0001）\n' +
+        'キャンセル: 樹木番号はこのままにする');
+    }
+  }
+  updatePark(selfId, { code: code, name: name, note: st.parkForm.note }, { renumber: renumber })
+    .then(function () { done(name + ' を更新しました'); });
+}
+
+function handleParkDelete(park) {
+  var counts = countParkContents(park.id);
+  var ok = window.confirm('「' + park.name + '」をまるごと削除します。\n\n' +
+    '　樹木 ' + counts.treeCount + '件 / 写真 ' + counts.photoCount + '枚 も一緒に消えます。\n' +
+    'この操作は取り消せません。よろしいですか？');
+  if (!ok) return;
+  deleteParkCascade(park.id).then(function () {
+    if (state.currentParkId === park.id) state.currentParkId = null;
+    if (state.listParkId === park.id) state.listParkId = null;
+    if (state.editingTree && state.editingTree.parkId === park.id) finishEdit();
+    showToast(park.name + ' を削除しました');
+    render();
+  });
+}
+
+/** CSVから公園を一括登録する（樹木台帳メモと同じ形式のCSVを想定） */
+function handleParkCsv(e) {
+  var st = state.settings;
+  var file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  st.csvBusy = true;
+  st.parkError = '';
+  render();
+
+  file.arrayBuffer().then(function (buf) {
+    var parsed = parseParkCsv(decodeCsvBuffer(buf));
+    if (!parsed.ok) {
+      st.parkError = parsed.reason;
+      return null;
+    }
+    var ok = window.confirm(file.name + ' から ' + parsed.rows.length + '件 の公園を読み取りました。\n' +
+      'すでに登録済みの公園は飛ばします。公園コードは続きから自動で付けます。\n\n登録しますか？');
+    if (!ok) return null;
+    return importParks(parsed.rows).then(function (res) {
+      showToast('公園を ' + res.added + '件 登録しました' +
+        (res.skipped ? '（' + res.skipped + '件は登録済みのため飛ばしました）' : ''));
+      if (res.skipped) {
+        st.parkError = '登録済みだった公園（' + res.skipped + '件）: ' +
+          res.skippedNames.slice(0, 5).join(' / ') + (res.skipped > 5 ? ' …' : '');
+      }
+      return res;
+    });
+  }).catch(function (err) {
+    st.parkError = 'CSVを読み込めませんでした: ' + (err && err.message ? err.message : err);
+  }).then(function () {
+    st.csvBusy = false;
+    render();
+  });
+}
+
+// ------------------------------------------------------------------
+// 樹種マスタの管理
+// ------------------------------------------------------------------
+function renderSpeciesManager() {
+  var st = state.settings;
+  var master = getSpeciesMaster();
+  var usage = getSpeciesUsage();
+
+  var input = el('input', {
+    type: 'text', value: st.speciesText, placeholder: '樹種名を追加（例 クスノキ）',
+    oninput: function (e) { st.speciesText = e.target.value; },
+    onkeydown: function (e) { if (e.key === 'Enter') { e.preventDefault(); addSpecies(); } },
+  });
+
+  function addSpecies() {
+    var name = st.speciesText.trim();
+    if (!name) return;
+    if (master.indexOf(name) >= 0) {
+      showToast(name + ' はすでにあります');
+      st.speciesText = '';
+      render();
+      return;
+    }
+    setSpeciesMaster(master.concat([name])).then(function () {
+      st.speciesText = '';
+      render();
+    });
+  }
+
+  function move(index, delta) {
+    var cur = getSpeciesMaster().slice();
+    var to = index + delta;
+    if (to < 0 || to >= cur.length) return;
+    var tmp = cur[index];
+    cur[index] = cur[to];
+    cur[to] = tmp;
+    setSpeciesMaster(cur).then(render);
+  }
+
+  function remove(name) {
+    if (!window.confirm('樹種「' + name + '」をマスタから外します。\n登録済みの樹木の樹種はそのまま残ります。')) return;
+    setSpeciesMaster(getSpeciesMaster().filter(function (n) { return n !== name; })).then(render);
+  }
+
+  var body = [
+    el('h3', { class: 'block-title', text: '樹種マスタ' }),
+    el('p', { class: 'hint', text:
+      '登録タブのタイルは「使用回数の降順」で上位12件を出します。並び順は回数が同じときに効きます。' }),
+    el('div', { class: 'link-row' }, [input, button('追加', 'btn btn-ghost', addSpecies)]),
+  ];
+  if (!master.length) body.push(el('p', { class: 'muted', text: 'まだ樹種がありません。' }));
+  body.push(el('ul', { class: 'rows' }, master.map(function (name, i) {
+    return el('li', { class: 'row' }, [
+      el('span', { class: 'row-main' }, [
+        el('strong', { text: name }),
+        el('span', { class: 'muted', text: (usage[name] || 0) + ' 回' }),
+      ]),
+      el('span', { class: 'row-actions' }, [
+        button('↑', 'btn btn-ghost', function () { move(i, -1); }, { disabled: i === 0 }),
+        button('↓', 'btn btn-ghost', function () { move(i, 1); }, { disabled: i === master.length - 1 }),
+        button('削除', 'btn btn-danger', function () { remove(name); }),
+      ]),
+    ]);
+  })));
+
+  return el('section', { class: 'block' }, body);
+}
+
+// ------------------------------------------------------------------
+// 紙の調査票（アプリを使わない人に渡す用紙）
+// ------------------------------------------------------------------
+var ROW_CHOICES = [10, 14, 18];
+
+function sheetOptions() {
+  var s = state.settings.sheet;
+  var park = parkById(s.parkId);
+  return {
+    parkName: park ? park.name : '',
+    surveyDate: s.surveyDate,
+    surveyor: s.surveyor,
+    tapeRoll: s.tapeRoll,
+    rows: s.rows,
+  };
+}
+
+function renderPrintSheetPanel() {
+  var s = state.settings.sheet;
+
+  var select = el('select', {
+    value: s.parkId,
+    onchange: function (e) { s.parkId = e.target.value; },
+  }, [el('option', { value: '', text: '（手書きする）' })].concat(mem.parks.map(function (p) {
+    return el('option', { value: p.id, text: p.name });
+  })));
+  select.value = s.parkId;
+
+  var body = [
+    el('h3', { class: 'block-title', text: '紙の調査票' }),
+    el('p', { class: 'hint', text:
+      'アプリを使わない人に渡すための用紙です。項目はアプリとまったく同じなので、' +
+      '書いてもらった紙をそのまま登録タブに転記できます。A4横・2枚（1枚目が記入表、2枚目が記入の凡例と運用のきまり）。' }),
+    el('label', { class: 'field' }, [
+      el('span', { class: 'field-label', text: '場所（公園）— 選ぶと用紙に印字されます' }),
+      select,
+    ]),
+    el('div', { class: 'field-row' }, [
+      field('調査日', {
+        type: 'date', value: s.surveyDate,
+        oninput: function (e) { s.surveyDate = e.target.value; },
+      }),
+      field('調査者', {
+        type: 'text', value: s.surveyor, placeholder: '（手書きする）',
+        oninput: function (e) { s.surveyor = e.target.value; },
+      }),
+    ]),
+    choiceRow('テープロール', TAPE_ROLLS.map(function (c) { return { value: c, label: c }; }), s.tapeRoll,
+      function (next) { s.tapeRoll = next; render(); }),
+    choiceRow('1枚に入れる行数（＝本数）', ROW_CHOICES.map(function (n) { return { value: n, label: String(n) }; }),
+      s.rows, function (next) { s.rows = next === '' ? s.rows : next; render(); },
+      { hint: '行を増やすと1行が細くなります。手書きなら14行が目安' }),
+    el('div', { class: 'btn-row' }, [
+      button('🖨 調査票を開く（印刷）', 'btn btn-primary btn-wrap', function () { openSheetViewer(sheetOptions()); }),
+      button('HTMLで保存', 'btn btn-ghost btn-wrap', function () {
+        downloadFile('樹木点検チェックシート-' + (s.surveyDate || toDateInput()) + '.html',
+          buildSurveySheetHtml(sheetOptions()), 'text/html;charset=utf-8');
+        showToast('調査票を保存しました（開いて印刷してください）');
+      }),
+    ]),
+    el('p', { class: 'hint', text:
+      '用紙はこの画面の中で開きます（別のタブに移らないので、「✕ 閉じる」でいつでもアプリに戻れます）。' +
+      '印刷は開いた画面の「🖨 印刷する」から。用紙はA4・横、余白は既定のままで収まります。' +
+      'パソコンで印刷したいときは「HTMLで保存」。' }),
+  ];
+
+  return el('section', { class: 'block' }, body);
+}
+
+/**
+ * 紙の調査票を「アプリの中で」開く重ね表示。
+ * 別タブ（window.open）で開くと、ホーム画面から起動したiPhoneには戻るボタンが無く
+ * アプリへ帰れないので、アプリの上に重ねて出し [✕ 閉じる] で戻す。
+ */
+function openSheetViewer(options) {
+  var doc = el('div', { class: 'sheetdoc', html: buildSurveySheetFragment(options) });
+  var viewerBody = el('div', { class: 'sheet-viewer-body' }, [doc]);
+  var viewer = el('div', {
+    class: 'sheet-viewer is-fit', role: 'dialog', 'aria-modal': 'true', 'aria-label': '紙の調査票',
+  });
+
+  var close = function () {
+    window.removeEventListener('resize', measure);
+    window.removeEventListener('keydown', onKey);
+    document.body.classList.remove('sheet-open');
+    viewer.remove();
+  };
+  var onKey = function (e) { if (e.key === 'Escape') close(); };
+
+  var fitBtn = button('🔍 拡大', 'btn btn-ghost', function () {
+    var fit = viewer.classList.toggle('is-fit');
+    fitBtn.textContent = fit ? '🔍 拡大' : '⤢ 全体';
+    fitBtn.setAttribute('aria-pressed', fit ? 'false' : 'true');
+  });
+
+  viewer.appendChild(el('div', { class: 'sheet-viewer-bar' }, [
+    button('✕ 閉じる', 'btn btn-ghost', close),
+    button('🖨 印刷する', 'btn btn-primary', function () { window.print(); }),
+    fitBtn,
+  ]));
+  viewer.appendChild(viewerBody);
+  viewer.appendChild(el('p', { class: 'sheet-viewer-hint' }, [
+    '画面の見え方にかかわらず、印刷は', el('b', { text: 'A4・横' }), 'の原寸で出ます',
+  ]));
+
+  // アプリ本体（#root）の兄弟として body 直下に出す。
+  // こうしておくと、印刷のときに #root だけを隠せる。
+  document.body.appendChild(viewer);
+  document.body.classList.add('sheet-open');
+
+  // 画面幅にちょうど収まる倍率を決める。用紙の実寸（281mm＋余白）は変わらないので、
+  // 縮める前に一度だけ測って覚えておく（縮めたあとに測り直すと合わなくなる）。
+  // scrollWidth は右側の余白を数えない（右端が切れる）ので、用紙1枚の幅に
+  // 外側の余白を足して実寸を出す。
+  var naturalW = (function () {
+    var sheet = doc.querySelector('.sheet');
+    if (!sheet) return doc.scrollWidth;
+    var pad = window.getComputedStyle(doc);
+    return sheet.getBoundingClientRect().width +
+      (parseFloat(pad.paddingLeft) || 0) + (parseFloat(pad.paddingRight) || 0);
+  })();
+  function measure() {
+    if (!naturalW) return;
+    viewer.style.setProperty('--sheet-zoom', String(Math.min(1, viewerBody.clientWidth / naturalW)));
+  }
+  measure();
+  window.addEventListener('resize', measure);
+  window.addEventListener('keydown', onKey);
+}
+
+// ------------------------------------------------------------------
+// バックアップ・書き出し
+// ------------------------------------------------------------------
+
+/** 保存してあるものを全部そろえる（フルバックアップ用） */
+function loadAll() {
+  return getAllPhotos().then(function (photos) {
+    return {
+      parks: mem.parks,
+      trees: mem.trees,
+      photos: photos,
+      // 本体（Dexie）と同じ形（[{key,value},…]）にそろえて書き出す
+      settings: Object.keys(mem.settings).map(function (key) {
+        return { key: key, value: mem.settings[key] };
+      }),
+    };
+  });
+}
+
+function daysSince(iso) {
+  if (!iso) return null;
+  var ms = Date.now() - new Date(iso).getTime();
+  return Number.isNaN(ms) ? null : Math.floor(ms / 86400000);
+}
+
+function parkNameMap() {
+  var map = {};
+  mem.parks.forEach(function (p) { map[p.id] = p.name; });
+  return map;
+}
+
+function renderBackupPanel() {
+  var st = state.settings;
+
+  // ストレージ使用量は非同期でしか取れないので、1回だけ取りに行って画面を作り直す
+  if (st.storage === null && !st.storageAsked) {
+    st.storageAsked = true;
+    estimateStorage().then(function (res) {
+      st.storage = res || false;
+      if (state.tab === 'settings') render();
+    });
+  }
+
+  var importInput = el('input', {
+    type: 'file', accept: '.json,application/json', hidden: true,
+    onchange: function (e) { handleImportJson(e); },
+  });
+
+  var d = daysSince(getSetting('lastBackupAt', null));
+
+  var body = [
+    el('h3', { class: 'block-title', text: 'バックアップ・書き出し' }),
+    el('p', {
+      class: d !== null && d >= 7 ? 'status status-error' : 'hint',
+      text: d === null ? 'まだバックアップを取っていません。' : '最終バックアップから ' + d + ' 日',
+    }),
+    el('div', { class: 'btn-grid' }, [
+      button('JSON 写真あり', 'btn btn-primary', exportFullJson),
+      button('JSON 写真なし', 'btn', exportLightJson),
+      button('CSV', 'btn', exportCsv),
+      button('CSV 凡例', 'btn', function () {
+        downloadFile('kantantree-凡例-' + fileStamp() + '.csv', buildLegendCsv(), 'text/csv;charset=utf-8');
+        showToast('凡例CSVを書き出しました');
+      }),
+    ]),
+    el('p', { class: 'hint', text:
+      '「写真あり」が端末を移すときのフルバックアップ。「写真なし」は他のアプリ（本体のReact版を含む）への受け渡し用。' +
+      'CSVはExcel（UTF-8 BOM付き）。「CSV 凡例」は 1〜4 の段階の意味をまとめた別ファイルです。' }),
+    importInput,
+    el('div', { class: 'btn-row' }, [
+      button('JSONを読み込む（追記マージ）', 'btn btn-wrap', function () { importInput.click(); }),
+    ]),
+    el('p', { class: 'hint', text:
+      '読み込みは「追記マージ」です。同じ id は更新日時の新しい方を採用し、知らない id は追加します。' +
+      '本体（React版）で書き出したJSONもそのまま読み込めます。' }),
+    el('p', { class: 'hint', text: 'ストレージ使用量: ' + (st.storage
+      ? '約 ' + formatBytes(st.storage.usage) + (st.storage.quota ? ' / ' + formatBytes(st.storage.quota) : '')
+      : 'この端末では取得できません') }),
+  ];
+
+  return el('section', { class: 'block' }, body);
+}
+
+function exportFullJson() {
+  loadAll().then(function (all) {
+    downloadFile('kantantree-backup-' + fileStamp() + '.json',
+      JSON.stringify(buildFullBackup(all)), 'application/json');
+    return setSetting('lastBackupAt', new Date().toISOString()).then(function () {
+      showToast('フルバックアップを書き出しました（樹木 ' + all.trees.length + '件 / 写真 ' + all.photos.length + '枚）');
+      render();
+    });
+  });
+}
+
+function exportLightJson() {
+  downloadFile('kantantree-light-' + fileStamp() + '.json',
+    JSON.stringify(buildLightBackup({ parks: mem.parks, trees: mem.trees })), 'application/json');
+  showToast('軽量JSONを書き出しました（樹木 ' + mem.trees.length + '件）');
+}
+
+function exportCsv() {
+  downloadFile('kantantree-' + fileStamp() + '.csv', buildCsv(mem.trees, parkNameMap()), 'text/csv;charset=utf-8');
+  showToast('CSVを書き出しました（' + mem.trees.length + '件）');
+}
+
+/** JSONの読み込み（追記マージ。全上書きではない） */
+function handleImportJson(e) {
+  var file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+
+  file.text().then(function (text) {
+    var data = JSON.parse(text);
+    var invalid = validateBackup(data);
+    if (invalid) { showToast(invalid); return null; }
+
+    var plan = planMerge({ parks: mem.parks, trees: mem.trees }, data);
+    var ok = window.confirm('このファイルを追記マージします（全上書きではありません）。\n\n' +
+      '　公園: 追加 ' + plan.parks.add.length + '件 / 更新 ' + plan.parks.update.length + '件\n' +
+      '　樹木: 追加 ' + plan.trees.add.length + '件 / 更新 ' + plan.trees.update.length + '件\n' +
+      '　変更なし（取込側が古い）: ' + plan.skipped + '件\n\n実行しますか？');
+    if (!ok) return null;
+
+    var parkPuts = plan.parks.add.concat(plan.parks.update);
+    var treePuts = plan.trees.add.concat(plan.trees.update);
+    var treeIds = treePuts.map(function (t) { return t.id; });
+    // 写真は「取込側に写真が入っている樹木」だけ入れ替える
+    var incomingPhotos = (data.photos || []).filter(function (p) { return treeIds.indexOf(p.treeId) >= 0; });
+    var photoTreeIds = [];
+    incomingPhotos.forEach(function (p) {
+      if (photoTreeIds.indexOf(p.treeId) < 0) photoTreeIds.push(p.treeId);
+    });
+
+    // メモリ側を先に更新する（画面はメモリを見ているため）
+    parkPuts.forEach(function (rec) {
+      var at = mem.parks.findIndex(function (x) { return x.id === rec.id; });
+      if (at >= 0) mem.parks[at] = rec; else mem.parks.push(rec);
+    });
+    treePuts.forEach(function (rec) {
+      var at = mem.trees.findIndex(function (x) { return x.id === rec.id; });
+      if (at >= 0) mem.trees[at] = rec; else mem.trees.push(rec);
+    });
+    if (store.mode === 'memory' && photoTreeIds.length) {
+      mem.photos = mem.photos || {};
+      photoTreeIds.forEach(function (id) { mem.photos[id] = []; });
+      incomingPhotos.forEach(function (p) { mem.photos[p.treeId].push(p); });
+    }
+
+    // 樹種マスタは足し合わせる（消さない）
+    var incomingMaster = [];
+    (data.settings || []).forEach(function (s) {
+      if (s && s.key === 'speciesMaster' && Array.isArray(s.value)) incomingMaster = s.value;
+    });
+    var settingsPuts = [];
+    if (incomingMaster.length) {
+      var merged = getSpeciesMaster().slice();
+      incomingMaster.forEach(function (name) { if (merged.indexOf(name) < 0) merged.push(name); });
+      mem.settings.speciesMaster = merged;
+      settingsPuts.push({ key: 'speciesMaster', value: merged });
+    }
+
+    var ops = {};
+    if (parkPuts.length) ops.parks = { put: parkPuts };
+    if (treePuts.length) ops.trees = { put: treePuts };
+    if (photoTreeIds.length) ops.photos = { delByTree: photoTreeIds, put: incomingPhotos };
+    if (settingsPuts.length) ops.settings = { put: settingsPuts };
+
+    return persist(ops).then(function () {
+      showToast('取込みました（公園 +' + plan.parks.add.length + '/更新' + plan.parks.update.length +
+        '、樹木 +' + plan.trees.add.length + '/更新' + plan.trees.update.length + '）');
+      state.settings.storage = null;
+      state.settings.storageAsked = false;
+      render();
+    });
+  }).catch(function (err) {
+    showToast('取込に失敗しました: ' + (err && err.message ? err.message : err));
+  });
+}
+
+/* ==================================================================
+   §12 起動（本体 src/App.jsx / main.jsx）
+   ================================================================== */
+
+function boot() {
+  rootEl.appendChild(el('div', { class: 'app' }, [
+    el('header', { class: 'appbar' }),
+    el('main', { class: 'main' }, [el('p', { class: 'muted pad', text: '読み込み中…' })]),
+    el('footer', { class: 'copyright', text: '© 2026 Koh Kitsukawa. All rights reserved.' }),
+    el('nav', { class: 'tabbar' }),
+  ]));
+  mainEl = rootEl.querySelector('.main');
+
+  openStore().then(function () {
+    // 起動時: 最後に使った公園を選んでおく
+    var recent = sortedParks()[0];
+    if (recent) {
+      state.currentParkId = recent.id;
+      state.listParkId = recent.id;
+    }
+    // 紙の調査票の初期値も、前回の調査情報にそろえる
+    var last = getSetting('lastSurvey', null);
+    if (last) {
+      state.settings.sheet.surveyDate = last.surveyDate || '';
+      state.settings.sheet.surveyor = last.surveyor || '';
+      state.settings.sheet.tapeRoll = last.tapeRoll || '';
+    }
+    initForm();
+    render();
+    if (store.mode !== 'idb') showToast('保存先について、設定タブに注意書きがあります');
+  }).catch(function (err) {
+    mainEl.textContent = '';
+    mainEl.appendChild(el('p', { class: 'status status-error pad',
+      text: '起動できませんでした: ' + (err && err.message ? err.message : err) }));
+  });
+}
+
+boot();
+
+})();
+</script>
+</body>
+</html>
